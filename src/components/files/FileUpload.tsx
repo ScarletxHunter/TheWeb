@@ -89,7 +89,7 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
         setUploads((prev) => prev.filter((u) => u.status !== 'done'));
       }, 2000);
     },
-    [user, folderId, onUploadComplete]
+    [user, folderId, onUploadComplete, groupId]
   );
 
   const handleDrop = useCallback(

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Trash2, RotateCcw, AlertTriangle, Menu } from 'lucide-react';
 import { getTrashedFiles, restoreFile, deleteFileRecord } from '../lib/database';
 import { deleteFile } from '../lib/storage';
 import { formatBytes, formatDate } from '../lib/utils';
@@ -46,6 +46,12 @@ export function Trash() {
   return (
     <>
       <header className="bg-gray-900 border-b border-gray-800 px-4 lg:px-6 py-4 flex items-center gap-4">
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('toggle-sidebar'))}
+          className="lg:hidden text-gray-400 hover:text-white cursor-pointer"
+        >
+          <Menu className="w-6 h-6" />
+        </button>
         <Trash2 className="w-6 h-6 text-gray-400" />
         <h1 className="text-lg font-semibold text-white">Trash</h1>
         {files.length > 0 && (

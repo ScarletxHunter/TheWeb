@@ -1,14 +1,19 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { Sidebar } from './Sidebar';
 import { BottomNav } from './BottomNav';
 
 interface LayoutProps {
   children: ReactNode;
-  onUploadClick?: () => void;
 }
 
-export function Layout({ children, onUploadClick }: LayoutProps) {
+export function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const handleToggle = () => setSidebarOpen(prev => !prev);
+    window.addEventListener('toggle-sidebar', handleToggle);
+    return () => window.removeEventListener('toggle-sidebar', handleToggle);
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-950 flex">
@@ -16,7 +21,7 @@ export function Layout({ children, onUploadClick }: LayoutProps) {
       <main className="flex-1 flex flex-col min-w-0 pb-20 lg:pb-0">
         {children}
       </main>
-      <BottomNav onUploadClick={onUploadClick} />
+      <BottomNav />
     </div>
   );
 }

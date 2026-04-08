@@ -1,18 +1,24 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Home, Plus, Trash2, Shield, Users } from 'lucide-react';
 
-interface BottomNavProps {
-  onUploadClick?: () => void;
-}
-
-export function BottomNav({ onUploadClick }: BottomNavProps) {
+export function BottomNav() {
   const { isAdmin } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleUploadClick = () => {
+    if (location.pathname !== '/') {
+      navigate('/');
+    }
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('scroll-to-upload'));
+    }, 100);
+  };
 
   const tabs = [
     { to: '/', icon: Home, label: 'Files' },
-    ...(isAdmin ? [{ to: '#upload', icon: Plus, label: 'Upload', action: onUploadClick }] : []),
+    { to: '#upload', icon: Plus, label: 'Upload', action: handleUploadClick },
     { to: '/groups', icon: Users, label: 'Groups' },
     { to: '/trash', icon: Trash2, label: 'Trash' },
     ...(isAdmin ? [{ to: '/admin', icon: Shield, label: 'Admin' }] : []),

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useFiles } from '../hooks/useFiles';
@@ -36,7 +36,7 @@ export function Dashboard() {
   const { files, loading: filesLoading, refresh: refreshFiles, searchFiles } = useFiles(folderId, spaceContext);
   const { folders, breadcrumbs, loading: foldersLoading, refresh: refreshFolders } = useFolders(folderId, spaceContext);
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const uploadRef = useRef<HTMLDivElement>(null);
   const [shareFile, setShareFile] = useState<FileRecord | null>(null);
   const [previewFile, setPreviewFile] = useState<FileRecord | null>(null);
   const [moveFileIds, setMoveFileIds] = useState<string[] | null>(null);
@@ -124,6 +124,14 @@ export function Dashboard() {
     else { toast.success('File renamed'); refreshFiles(); }
   };
 
+  useEffect(() => {
+    const handleScrollToUpload = () => {
+      uploadRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    window.addEventListener('scroll-to-upload', handleScrollToUpload);
+    return () => window.removeEventListener('scroll-to-upload', handleScrollToUpload);
+  }, []);
+
   const loading = filesLoading || foldersLoading;
   const selectionMode = selectedIds.size > 0;
   const isGroupSpace = space === 'group' && groupId;
@@ -132,7 +140,7 @@ export function Dashboard() {
   return (
     <>
       <Header
-        onMenuClick={() => setSidebarOpen(!sidebarOpen)}
+        onMenuClick={() => window.dispatchEvent(new CustomEvent('toggle-sidebar'))}
         onSearch={searchFiles}
         title={headerTitle}
       />
@@ -170,11 +178,13 @@ export function Dashboard() {
         </div>
 
         {/* Upload zone - available to all users */}
-        <FileUpload
-          folderId={folderId}
-          onUploadComplete={handleUploadComplete}
-          groupId={isGroupSpace ? groupId : undefined}
-        />
+        <div ref={uploadRef}>
+          <FileUpload
+            folderId={folderId}
+            onUploadComplete={handleUploadComplete}
+            groupId={isGroupSpace ? groupId : undefined}
+          />
+        </div>
 
         {/* Loading */}
         {loading && (

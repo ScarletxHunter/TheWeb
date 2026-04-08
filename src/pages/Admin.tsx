@@ -11,7 +11,7 @@ export function Admin() {
 
   return (
     <>
-      <Header onMenuClick={() => {}} onSearch={() => {}} title="Admin" />
+      <Header onMenuClick={() => window.dispatchEvent(new CustomEvent('toggle-sidebar'))} onSearch={() => {}} title="Admin" />
       <div className="flex-1 p-4 lg:p-6 space-y-8 overflow-y-auto">
         <StorageStats />
         <UserManager />

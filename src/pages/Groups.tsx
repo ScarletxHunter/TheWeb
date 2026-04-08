@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Users, Plus, Trash2, UserPlus, X, Crown, User } from 'lucide-react';
+import { Users, Plus, Trash2, UserPlus, X, Crown, User, Menu } from 'lucide-react';
 import { getMyGroups, createGroup, deleteGroup, getGroupMembers, addGroupMember, removeGroupMember, findUserByEmail } from '../lib/database';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -73,6 +73,12 @@ export function Groups() {
   return (
     <>
       <header className="bg-gray-900 border-b border-gray-800 px-4 lg:px-6 py-4 flex items-center gap-4">
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('toggle-sidebar'))}
+          className="lg:hidden text-gray-400 hover:text-white cursor-pointer"
+        >
+          <Menu className="w-6 h-6" />
+        </button>
         <Users className="w-6 h-6 text-gray-400" />
         <h1 className="text-lg font-semibold text-white">Groups</h1>
         <button
