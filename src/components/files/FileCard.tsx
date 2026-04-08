@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Download, Trash2, Share2, MoreVertical, Pencil, Eye, FolderInput } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { downloadFile } from '../../lib/storage';
@@ -23,6 +23,17 @@ export function FileCard({ file, onDelete, onShare, onPreview, onRename, onMove,
   const canManage = user?.id === file.uploaded_by;
   const [menuOpen, setMenuOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+
+  const isImage = file.mime_type.startsWith('image/');
+
+  useEffect(() => {
+    if (isImage) {
+      downloadFile(file.storage_path).then(({ url }) => {
+        if (url) setThumbUrl(url);
+      });
+    }
+  }, [file.storage_path, isImage]);
 
   const Icon = getFileIcon(file.mime_type);
   const colorClass = getFileColor(file.mime_type);
@@ -133,10 +144,16 @@ export function FileCard({ file, onDelete, onShare, onPreview, onRename, onMove,
         )}
       </div>
 
-      {/* Icon */}
-      <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gray-800 flex items-center justify-center mb-2 sm:mb-3 ${colorClass}`}>
-        <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
-      </div>
+      {/* Thumbnail or Icon */}
+      {isImage && thumbUrl ? (
+        <div className="w-full h-24 sm:h-32 rounded-lg overflow-hidden bg-gray-800 mb-2 sm:mb-3">
+          <img src={thumbUrl} alt={file.name} className="w-full h-full object-cover" loading="lazy" />
+        </div>
+      ) : (
+        <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gray-800 flex items-center justify-center mb-2 sm:mb-3 ${colorClass}`}>
+          <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
+        </div>
+      )}
 
       {/* Info */}
       <p className="text-sm font-medium text-white truncate pr-6" title={file.name}>
@@ -152,7 +169,7 @@ export function FileCard({ file, onDelete, onShare, onPreview, onRename, onMove,
       <button
         onClick={(e) => { e.stopPropagation(); handleDownload(); }}
         disabled={downloading}
-        className="mt-2 sm:mt-3 w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium py-2 min-h-[44px] rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+        className="mt-2 sm:mt-3 w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium py-2 min-h-[44px] rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-95 transition-transform"
       >
         <Download className="w-3.5 h-3.5" />
         {downloading ? 'Downloading...' : 'Download'}

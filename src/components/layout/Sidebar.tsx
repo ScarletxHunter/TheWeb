@@ -44,8 +44,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       )}
 
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-gray-900 border-r border-gray-800 flex flex-col transition-transform lg:translate-x-0 ${
-          open ? 'translate-x-0' : '-translate-x-full'
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-gray-900 border-r border-gray-800 flex-col transition-transform duration-300 ease-in-out lg:translate-x-0 hidden lg:flex ${
+          open ? '!flex translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Logo */}
