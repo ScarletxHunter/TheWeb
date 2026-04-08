@@ -13,8 +13,8 @@ export function useShareLinks(fileId: string) {
     setLoading(false);
   }, [fileId]);
 
-  const create = async (createdBy: string, expiresInHours?: number) => {
-    const { data, error } = await createShareLink(fileId, createdBy, expiresInHours);
+  const create = async (createdBy: string, expiresInHours?: number, passwordHash?: string) => {
+    const { data, error } = await createShareLink(fileId, createdBy, expiresInHours, passwordHash);
     if (!error && data) {
       setLinks((prev) => [data, ...prev]);
     }

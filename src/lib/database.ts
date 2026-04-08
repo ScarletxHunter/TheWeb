@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { FileRecord, Folder, Profile, ShareLink } from '../types';
+import type { FileRecord, Folder, Group, GroupMember, Profile, ShareLink } from '../types';
 import { generateToken } from './utils';
 
 // ── Profiles ──
@@ -31,10 +31,11 @@ export async function updateProfileRole(userId: string, role: 'admin' | 'viewer'
 
 // ── Files ──
 
-export async function getFiles(folderId: string | null): Promise<FileRecord[]> {
+export async function getFiles(folderId: string | null, context?: { type: 'personal'; userId: string } | { type: 'group'; groupId: string }): Promise<FileRecord[]> {
   let query = supabase
     .from('files')
     .select('*, profiles(display_name, email)')
+    .is('deleted_at', null)
     .order('created_at', { ascending: false });
 
   if (folderId) {
@@ -43,17 +44,32 @@ export async function getFiles(folderId: string | null): Promise<FileRecord[]> {
     query = query.is('folder_id', null);
   }
 
+  if (context?.type === 'personal') {
+    query = query.eq('uploaded_by', context.userId).is('group_id', null);
+  } else if (context?.type === 'group') {
+    query = query.eq('group_id', context.groupId);
+  }
+
   const { data } = await query;
   return data ?? [];
 }
 
-export async function searchFiles(searchTerm: string): Promise<FileRecord[]> {
-  const { data } = await supabase
+export async function searchFiles(searchTerm: string, context?: { type: 'personal'; userId: string } | { type: 'group'; groupId: string }): Promise<FileRecord[]> {
+  let query = supabase
     .from('files')
     .select('*, profiles(display_name, email)')
+    .is('deleted_at', null)
     .ilike('name', `%${searchTerm}%`)
     .order('created_at', { ascending: false })
     .limit(50);
+
+  if (context?.type === 'personal') {
+    query = query.eq('uploaded_by', context.userId).is('group_id', null);
+  } else if (context?.type === 'group') {
+    query = query.eq('group_id', context.groupId);
+  }
+
+  const { data } = await query;
   return data ?? [];
 }
 
@@ -64,6 +80,7 @@ export async function createFileRecord(file: {
   mime_type: string;
   folder_id: string | null;
   uploaded_by: string;
+  group_id?: string | null;
 }): Promise<{ data: FileRecord | null; error: string | null }> {
   const { data, error } = await supabase
     .from('files')
@@ -79,6 +96,79 @@ export async function deleteFileRecord(fileId: string) {
     .delete()
     .eq('id', fileId);
   return { error: error?.message ?? null };
+}
+
+// Soft-delete a file (move to trash)
+export async function trashFile(fileId: string) {
+  const { error } = await supabase
+    .from('files')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', fileId);
+  return { error: error?.message ?? null };
+}
+
+// Trash multiple files
+export async function trashFiles(fileIds: string[]) {
+  const { error } = await supabase
+    .from('files')
+    .update({ deleted_at: new Date().toISOString() })
+    .in('id', fileIds);
+  return { error: error?.message ?? null };
+}
+
+// Restore a file from trash
+export async function restoreFile(fileId: string) {
+  const { error } = await supabase
+    .from('files')
+    .update({ deleted_at: null })
+    .eq('id', fileId);
+  return { error: error?.message ?? null };
+}
+
+// Get trashed files
+export async function getTrashedFiles(): Promise<FileRecord[]> {
+  const { data } = await supabase
+    .from('files')
+    .select('*, profiles(display_name, email)')
+    .not('deleted_at', 'is', null)
+    .order('deleted_at', { ascending: false });
+  return data ?? [];
+}
+
+// Rename a file
+export async function renameFile(fileId: string, newName: string) {
+  const { error } = await supabase
+    .from('files')
+    .update({ name: newName })
+    .eq('id', fileId);
+  return { error: error?.message ?? null };
+}
+
+// Move file to a different folder
+export async function moveFile(fileId: string, targetFolderId: string | null) {
+  const { error } = await supabase
+    .from('files')
+    .update({ folder_id: targetFolderId })
+    .eq('id', fileId);
+  return { error: error?.message ?? null };
+}
+
+// Move multiple files
+export async function moveFiles(fileIds: string[], targetFolderId: string | null) {
+  const { error } = await supabase
+    .from('files')
+    .update({ folder_id: targetFolderId })
+    .in('id', fileIds);
+  return { error: error?.message ?? null };
+}
+
+// Get all folders (for move-to picker)
+export async function getAllFolders(): Promise<Folder[]> {
+  const { data } = await supabase
+    .from('folders')
+    .select('*')
+    .order('name', { ascending: true });
+  return data ?? [];
 }
 
 export async function getTotalStorageUsed(): Promise<number> {
@@ -98,7 +188,7 @@ export async function getTotalFileCount(): Promise<number> {
 
 // ── Folders ──
 
-export async function getFolders(parentId: string | null): Promise<Folder[]> {
+export async function getFolders(parentId: string | null, context?: { type: 'personal'; userId: string } | { type: 'group'; groupId: string }): Promise<Folder[]> {
   let query = supabase
     .from('folders')
     .select('*')
@@ -110,14 +200,20 @@ export async function getFolders(parentId: string | null): Promise<Folder[]> {
     query = query.is('parent_id', null);
   }
 
+  if (context?.type === 'personal') {
+    query = query.eq('created_by', context.userId).is('group_id', null);
+  } else if (context?.type === 'group') {
+    query = query.eq('group_id', context.groupId);
+  }
+
   const { data } = await query;
   return data ?? [];
 }
 
-export async function createFolder(name: string, parentId: string | null, createdBy: string) {
+export async function createFolder(name: string, parentId: string | null, createdBy: string, groupId?: string | null) {
   const { data, error } = await supabase
     .from('folders')
-    .insert({ name, parent_id: parentId, created_by: createdBy })
+    .insert({ name, parent_id: parentId, created_by: createdBy, group_id: groupId ?? null })
     .select()
     .single();
   return { data, error: error?.message ?? null };
@@ -162,7 +258,7 @@ export async function getFolderPath(folderId: string | null): Promise<Folder[]> 
 
 // ── Share Links ──
 
-export async function createShareLink(fileId: string, createdBy: string, expiresInHours?: number) {
+export async function createShareLink(fileId: string, createdBy: string, expiresInHours?: number, passwordHash?: string) {
   const token = generateToken();
   const expires_at = expiresInHours
     ? new Date(Date.now() + expiresInHours * 60 * 60 * 1000).toISOString()
@@ -170,7 +266,7 @@ export async function createShareLink(fileId: string, createdBy: string, expires
 
   const { data, error } = await supabase
     .from('share_links')
-    .insert({ file_id: fileId, token, expires_at, created_by: createdBy })
+    .insert({ file_id: fileId, token, expires_at, created_by: createdBy, password_hash: passwordHash ?? null })
     .select('*, files(*)')
     .single();
   return { data, error: error?.message ?? null };
@@ -200,4 +296,85 @@ export async function deleteShareLink(linkId: string) {
     .delete()
     .eq('id', linkId);
   return { error: error?.message ?? null };
+}
+
+// ── Groups ──
+
+export async function getMyGroups(): Promise<Group[]> {
+  const { data } = await supabase
+    .from('groups')
+    .select('*')
+    .order('name', { ascending: true });
+  return data ?? [];
+}
+
+export async function createGroup(name: string, description: string | null, createdBy: string, avatarColor: string = '#6366f1') {
+  const { data, error } = await supabase
+    .from('groups')
+    .insert({ name, description, avatar_color: avatarColor, created_by: createdBy })
+    .select()
+    .single();
+
+  if (error) return { data: null, error: error.message };
+
+  // Add creator as admin member
+  if (data) {
+    await supabase.from('group_members').insert({
+      group_id: data.id,
+      user_id: createdBy,
+      role: 'admin',
+    });
+  }
+
+  return { data, error: null };
+}
+
+export async function updateGroup(groupId: string, updates: { name?: string; description?: string | null }) {
+  const { error } = await supabase
+    .from('groups')
+    .update(updates)
+    .eq('id', groupId);
+  return { error: error?.message ?? null };
+}
+
+export async function deleteGroup(groupId: string) {
+  const { error } = await supabase
+    .from('groups')
+    .delete()
+    .eq('id', groupId);
+  return { error: error?.message ?? null };
+}
+
+export async function getGroupMembers(groupId: string): Promise<GroupMember[]> {
+  const { data } = await supabase
+    .from('group_members')
+    .select('*, profiles(display_name, email)')
+    .eq('group_id', groupId)
+    .order('created_at', { ascending: true });
+  return data ?? [];
+}
+
+export async function addGroupMember(groupId: string, userId: string, role: 'admin' | 'member' = 'member') {
+  const { error } = await supabase
+    .from('group_members')
+    .insert({ group_id: groupId, user_id: userId, role });
+  return { error: error?.message ?? null };
+}
+
+export async function removeGroupMember(groupId: string, userId: string) {
+  const { error } = await supabase
+    .from('group_members')
+    .delete()
+    .eq('group_id', groupId)
+    .eq('user_id', userId);
+  return { error: error?.message ?? null };
+}
+
+export async function findUserByEmail(email: string): Promise<Profile | null> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('email', email)
+    .single();
+  return data;
 }

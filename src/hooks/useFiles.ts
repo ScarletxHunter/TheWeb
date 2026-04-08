@@ -1,32 +1,33 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getFiles, searchFiles as searchFilesDB } from '../lib/database';
+import { getFiles, searchFiles as searchFilesDb } from '../lib/database';
 import type { FileRecord } from '../types';
 
-export function useFiles(folderId: string | null) {
+type SpaceCtx = { type: 'personal'; userId: string } | { type: 'group'; groupId: string };
+
+export function useFiles(folderId: string | null, context?: SpaceCtx) {
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const ctxKey = context ? JSON.stringify(context) : 'none';
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const data = await getFiles(folderId);
+    const data = await getFiles(folderId, context);
     setFiles(data);
     setLoading(false);
-  }, [folderId]);
+  }, [folderId, ctxKey]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useEffect(() => { refresh(); }, [refresh]);
 
-  const searchFiles = async (term: string) => {
+  const searchFiles = useCallback(async (term: string) => {
     if (!term.trim()) {
       refresh();
       return;
     }
     setLoading(true);
-    const data = await searchFilesDB(term);
+    const data = await searchFilesDb(term, context);
     setFiles(data);
     setLoading(false);
-  };
+  }, [refresh, ctxKey]);
 
   return { files, loading, refresh, searchFiles };
 }

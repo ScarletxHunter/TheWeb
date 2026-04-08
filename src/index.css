@@ -4,3 +4,16 @@ body {
   margin: 0;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}

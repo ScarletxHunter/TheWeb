@@ -7,6 +7,8 @@ import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { Dashboard } from './pages/Dashboard';
 import { Admin } from './pages/Admin';
+import { Trash } from './pages/Trash';
+import { Groups } from './pages/Groups';
 import { SharedFile } from './pages/SharedFile';
 import { SetupGuide } from './pages/SetupGuide';
 import { isSupabaseConfigured } from './lib/supabase';
@@ -39,6 +41,26 @@ export default function App() {
               <ProtectedRoute>
                 <Layout>
                   <Dashboard />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/trash"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Trash />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/groups"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Groups />
                 </Layout>
               </ProtectedRoute>
             }

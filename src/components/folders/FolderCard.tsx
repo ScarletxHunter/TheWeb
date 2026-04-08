@@ -12,7 +12,8 @@ interface FolderCardProps {
 }
 
 export function FolderCard({ folder, onNavigate, onRefresh }: FolderCardProps) {
-  const { isAdmin } = useAuth();
+  const { user } = useAuth();
+  const canManage = user?.id === folder.created_by;
   const [menuOpen, setMenuOpen] = useState(false);
 
   const handleRename = async () => {
@@ -40,11 +41,11 @@ export function FolderCard({ folder, onNavigate, onRefresh }: FolderCardProps) {
       className="group bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-gray-700 transition-colors cursor-pointer relative"
       onClick={() => onNavigate(folder.id)}
     >
-      {isAdmin && (
+      {canManage && (
         <div className="absolute top-3 right-3" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => setMenuOpen(!menuOpen)}
-            className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-gray-800 text-gray-500 hover:text-white transition-all cursor-pointer"
+            className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1 rounded-lg hover:bg-gray-800 text-gray-500 hover:text-white transition-all cursor-pointer"
           >
             <MoreVertical className="w-4 h-4" />
           </button>

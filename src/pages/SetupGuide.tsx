@@ -1,4 +1,4 @@
-import { Lock, Database, Key, HardDrive, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Globe, Database, Key, HardDrive, CheckCircle2, ExternalLink } from 'lucide-react';
 
 const steps = [
   {
@@ -42,9 +42,9 @@ export function SetupGuide() {
         {/* Header */}
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-indigo-600 mb-5">
-            <Lock className="w-10 h-10 text-white" />
+            <Globe className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-4xl font-bold text-white mb-2">FileVault</h1>
+          <h1 className="text-4xl font-bold text-white mb-2">TheWeb</h1>
           <p className="text-gray-400 text-lg">
             Your personal file hub is almost ready
           </p>

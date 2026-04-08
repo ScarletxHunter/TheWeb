@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Link } from 'react-router-dom';
-import { Lock, Mail, User, UserPlus } from 'lucide-react';
+import { Globe, Lock, Mail, User, UserPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export function SignupForm() {
@@ -30,9 +30,9 @@ export function SignupForm() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 mb-4">
-            <Lock className="w-8 h-8 text-white" />
+            <Globe className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white">FileVault</h1>
+          <h1 className="text-3xl font-bold text-white">TheWeb</h1>
           <p className="text-gray-400 mt-2">Create your account</p>
         </div>
 

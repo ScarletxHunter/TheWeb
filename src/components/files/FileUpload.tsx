@@ -10,9 +10,10 @@ import type { UploadProgress } from '../../types';
 interface FileUploadProps {
   folderId: string | null;
   onUploadComplete: () => void;
+  groupId?: string | null;
 }
 
-export function FileUpload({ folderId, onUploadComplete }: FileUploadProps) {
+export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadProps) {
   const { user } = useAuth();
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -63,6 +64,7 @@ export function FileUpload({ folderId, onUploadComplete }: FileUploadProps) {
           mime_type: file.type || 'application/octet-stream',
           folder_id: folderId,
           uploaded_by: user.id,
+          group_id: groupId ?? null,
         });
 
         if (dbError) {

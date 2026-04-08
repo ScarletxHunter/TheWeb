@@ -1,12 +1,17 @@
-import { Link, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { getMyGroups } from '../../lib/database';
 import {
-  FolderOpen,
   Shield,
   LogOut,
-  Lock,
+  Globe,
+  Trash2,
+  Users,
+  HardDrive,
   X,
 } from 'lucide-react';
+import type { Group } from '../../types';
 
 interface SidebarProps {
   open: boolean;
@@ -16,15 +21,24 @@ interface SidebarProps {
 export function Sidebar({ open, onClose }: SidebarProps) {
   const { profile, isAdmin, signOut } = useAuth();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const [groups, setGroups] = useState<Group[]>([]);
 
-  const links = [
-    { to: '/', icon: FolderOpen, label: 'Files' },
+  const currentSpace = searchParams.get('space') || 'personal';
+  const currentGroupId = searchParams.get('groupId');
+
+  useEffect(() => {
+    getMyGroups().then(setGroups);
+  }, []);
+
+  const navLinks = [
+    { to: '/trash', icon: Trash2, label: 'Trash' },
+    { to: '/groups', icon: Users, label: 'Groups' },
     ...(isAdmin ? [{ to: '/admin', icon: Shield, label: 'Admin' }] : []),
   ];
 
   return (
     <>
-      {/* Mobile overlay */}
       {open && (
         <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={onClose} />
       )}
@@ -38,18 +52,59 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <div className="flex items-center justify-between px-6 py-5 border-b border-gray-800">
           <Link to="/" className="flex items-center gap-3 no-underline" onClick={onClose}>
             <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center">
-              <Lock className="w-5 h-5 text-white" />
+              <Globe className="w-5 h-5 text-white" />
             </div>
-            <span className="text-lg font-bold text-white">FileVault</span>
+            <span className="text-lg font-bold text-white">TheWeb</span>
           </Link>
           <button onClick={onClose} className="lg:hidden text-gray-400 hover:text-white cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
 
+        {/* Spaces */}
+        <div className="px-3 py-3 border-b border-gray-800">
+          <p className="px-3 mb-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">Spaces</p>
+
+          {/* My Files */}
+          <Link
+            to="/?space=personal"
+            onClick={onClose}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors no-underline ${
+              location.pathname === '/' && currentSpace === 'personal'
+                ? 'bg-indigo-600/20 text-indigo-400'
+                : 'text-gray-400 hover:text-white hover:bg-gray-800'
+            }`}
+          >
+            <HardDrive className="w-5 h-5" />
+            My Files
+          </Link>
+
+          {/* Groups */}
+          {groups.map(group => (
+            <Link
+              key={group.id}
+              to={`/?space=group&groupId=${group.id}`}
+              onClick={onClose}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors no-underline ${
+                currentSpace === 'group' && currentGroupId === group.id
+                  ? 'bg-indigo-600/20 text-indigo-400'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+              }`}
+            >
+              <div
+                className="w-5 h-5 rounded flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                style={{ backgroundColor: group.avatar_color }}
+              >
+                {group.name[0].toUpperCase()}
+              </div>
+              <span className="truncate">{group.name}</span>
+            </Link>
+          ))}
+        </div>
+
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {links.map((link) => {
+        <nav className="flex-1 px-3 py-3 space-y-1">
+          {navLinks.map((link) => {
             const active = location.pathname === link.to;
             return (
               <Link

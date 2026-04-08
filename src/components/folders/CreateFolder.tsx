@@ -7,16 +7,17 @@ import toast from 'react-hot-toast';
 interface CreateFolderProps {
   parentId: string | null;
   onCreated: () => void;
+  groupId?: string | null;
 }
 
-export function CreateFolder({ parentId, onCreated }: CreateFolderProps) {
+export function CreateFolder({ parentId, onCreated, groupId }: CreateFolderProps) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
 
   const handleCreate = async () => {
     if (!name.trim() || !user) return;
-    const { error } = await createFolder(name.trim(), parentId, user.id);
+    const { error } = await createFolder(name.trim(), parentId, user.id, groupId);
     if (error) {
       toast.error('Failed to create folder');
     } else {
