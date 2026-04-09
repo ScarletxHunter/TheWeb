@@ -309,24 +309,25 @@ export async function getMyGroups(): Promise<Group[]> {
 }
 
 export async function createGroup(name: string, description: string | null, createdBy: string, avatarColor: string = '#6366f1') {
-  const { data, error } = await supabase
+  // Generate ID client-side so we don't need .select() (which would fail due to RLS)
+  const groupId = crypto.randomUUID();
+
+  const { error } = await supabase
     .from('groups')
-    .insert({ name, description, avatar_color: avatarColor, created_by: createdBy })
-    .select()
-    .single();
+    .insert({ id: groupId, name, description, avatar_color: avatarColor, created_by: createdBy });
 
   if (error) return { data: null, error: error.message };
 
   // Add creator as admin member
-  if (data) {
-    await supabase.from('group_members').insert({
-      group_id: data.id,
-      user_id: createdBy,
-      role: 'admin',
-    });
-  }
+  const { error: memberError } = await supabase.from('group_members').insert({
+    group_id: groupId,
+    user_id: createdBy,
+    role: 'admin',
+  });
 
-  return { data, error: null };
+  if (memberError) return { data: null, error: memberError.message };
+
+  return { data: { id: groupId, name, description, avatar_color: avatarColor, created_by: createdBy }, error: null };
 }
 
 export async function updateGroup(groupId: string, updates: { name?: string; description?: string | null }) {
