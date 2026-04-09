@@ -12,11 +12,12 @@ import { CreateFolder } from '../components/folders/CreateFolder';
 import { ShareLinkModal } from '../components/sharing/ShareLinkModal';
 import { FilePreviewModal } from '../components/files/FilePreviewModal';
 import { MoveToFolderModal } from '../components/files/MoveToFolderModal';
-import { FolderOpen, Trash2, X, Download, FolderInput } from 'lucide-react';
+import { FolderOpen, Trash2, X, Download, FolderInput, Upload, CloudOff } from 'lucide-react';
 import { trashFile, trashFiles, renameFile } from '../lib/database';
 import { downloadFile } from '../lib/storage';
 import toast from 'react-hot-toast';
 import type { FileRecord } from '../types';
+import type { ViewMode, SortField, SortOrder } from '../components/layout/Header';
 
 export function Dashboard() {
   const { user } = useAuth();
@@ -42,6 +43,52 @@ export function Dashboard() {
   const [moveFileIds, setMoveFileIds] = useState<string[] | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const lastSelectedRef = useRef<string | null>(null);
+
+  // View mode & sort
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    return (localStorage.getItem('theweb-viewmode') as ViewMode) || 'grid';
+  });
+  const [sortField, setSortField] = useState<SortField>(() => {
+    return (localStorage.getItem('theweb-sortfield') as SortField) || 'created_at';
+  });
+  const [sortOrder, setSortOrder] = useState<SortOrder>(() => {
+    return (localStorage.getItem('theweb-sortorder') as SortOrder) || 'desc';
+  });
+
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem('theweb-viewmode', mode);
+  };
+
+  const handleSortChange = (field: SortField, order: SortOrder) => {
+    setSortField(field);
+    setSortOrder(order);
+    localStorage.setItem('theweb-sortfield', field);
+    localStorage.setItem('theweb-sortorder', order);
+  };
+
+  // Sort files
+  const sortedFiles = useMemo(() => {
+    const sorted = [...files].sort((a, b) => {
+      let cmp = 0;
+      switch (sortField) {
+        case 'name':
+          cmp = a.name.localeCompare(b.name);
+          break;
+        case 'size':
+          cmp = a.size - b.size;
+          break;
+        case 'created_at':
+          cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          break;
+        case 'mime_type':
+          cmp = a.mime_type.localeCompare(b.mime_type);
+          break;
+      }
+      return sortOrder === 'asc' ? cmp : -cmp;
+    });
+    return sorted;
+  }, [files, sortField, sortOrder]);
 
   const navigateToFolder = useCallback(
     (id: string | null) => {
@@ -87,7 +134,7 @@ export function Dashboard() {
   const clearSelection = () => setSelectedIds(new Set());
   const selectAll = () => setSelectedIds(new Set(files.map(f => f.id)));
 
-  // Bulk actions - available to all users (owner-based permissions enforced by RLS)
+  // Bulk actions
   const handleBulkTrash = async () => {
     if (!confirm(`Move ${selectedIds.size} file(s) to trash?`)) return;
     const { error } = await trashFiles([...selectedIds]);
@@ -116,14 +163,14 @@ export function Dashboard() {
     else { toast.success('File moved to trash'); refreshFiles(); }
   };
 
-  const handleRenameFile = async (file: FileRecord) => {
-    const newName = prompt('Rename file:', file.name);
+  const handleRenameFile = async (file: FileRecord, newName: string) => {
     if (!newName || newName === file.name) return;
     const { error } = await renameFile(file.id, newName);
     if (error) toast.error('Failed to rename');
     else { toast.success('File renamed'); refreshFiles(); }
   };
 
+  // Scroll-to-upload event
   useEffect(() => {
     const handleScrollToUpload = () => {
       uploadRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -131,6 +178,27 @@ export function Dashboard() {
     window.addEventListener('scroll-to-upload', handleScrollToUpload);
     return () => window.removeEventListener('scroll-to-upload', handleScrollToUpload);
   }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger when typing in inputs
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        e.preventDefault();
+        selectAll();
+      }
+      if (e.key === 'Escape') {
+        clearSelection();
+      }
+      if (e.key === 'Delete' && selectedIds.size > 0) {
+        handleBulkTrash();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [files, selectedIds]);
 
   const loading = filesLoading || foldersLoading;
   const selectionMode = selectedIds.size > 0;
@@ -143,6 +211,11 @@ export function Dashboard() {
         onMenuClick={() => window.dispatchEvent(new CustomEvent('toggle-sidebar'))}
         onSearch={searchFiles}
         title={headerTitle}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
+        sortField={sortField}
+        sortOrder={sortOrder}
+        onSortChange={handleSortChange}
       />
 
       {/* Bulk action toolbar */}
@@ -177,7 +250,7 @@ export function Dashboard() {
           />
         </div>
 
-        {/* Upload zone - available to all users */}
+        {/* Upload zone */}
         <div ref={uploadRef}>
           <FileUpload
             folderId={folderId}
@@ -186,10 +259,18 @@ export function Dashboard() {
           />
         </div>
 
-        {/* Loading */}
+        {/* Loading skeleton */}
         {loading && (
-          <div className="flex items-center justify-center py-12">
-            <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {[...Array(8)].map((_, i) => (
+                <div key={i} className="bg-gray-900 border border-gray-800 rounded-xl p-4 animate-pulse">
+                  <div className="w-12 h-12 rounded-xl bg-gray-800 mb-3" />
+                  <div className="h-4 bg-gray-800 rounded w-3/4 mb-2" />
+                  <div className="h-3 bg-gray-800 rounded w-1/2" />
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -211,13 +292,13 @@ export function Dashboard() {
         )}
 
         {/* Files */}
-        {!loading && files.length > 0 && (
+        {!loading && sortedFiles.length > 0 && (
           <div>
             <h2 className="text-sm font-medium text-gray-400 mb-3">
-              Files ({files.length})
+              Files ({sortedFiles.length})
             </h2>
             <FileGrid
-              files={files}
+              files={sortedFiles}
               onRefresh={refreshFiles}
               onShareFile={setShareFile}
               onPreviewFile={setPreviewFile}
@@ -227,20 +308,38 @@ export function Dashboard() {
               selectedIds={selectedIds}
               onSelect={toggleSelect}
               selectionMode={selectionMode}
+              viewMode={viewMode}
             />
           </div>
         )}
 
         {/* Empty state */}
         {!loading && folders.length === 0 && files.length === 0 && (
-          <div className="text-center py-16">
-            <FolderOpen className="w-16 h-16 text-gray-700 mx-auto mb-4" />
-            <p className="text-gray-400 text-lg">
+          <div className="text-center py-20">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gray-800/50 mb-5">
+              {folderId ? (
+                <FolderOpen className="w-10 h-10 text-gray-600" />
+              ) : (
+                <CloudOff className="w-10 h-10 text-gray-600" />
+              )}
+            </div>
+            <p className="text-gray-300 text-lg font-medium">
               {folderId ? 'This folder is empty' : 'No files yet'}
             </p>
-            <p className="text-gray-600 text-sm mt-1">
-              Upload files or create a folder to get started
+            <p className="text-gray-600 text-sm mt-2 max-w-sm mx-auto">
+              {folderId
+                ? 'Upload files or create subfolders to organize your content'
+                : 'Drag and drop files above or click the upload area to get started'}
             </p>
+            {!folderId && (
+              <button
+                onClick={() => uploadRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                Upload your first file
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -253,7 +352,7 @@ export function Dashboard() {
       {previewFile && (
         <FilePreviewModal
           file={previewFile}
-          files={files}
+          files={sortedFiles}
           onClose={() => setPreviewFile(null)}
           onShare={() => { setShareFile(previewFile); setPreviewFile(null); }}
           onNavigate={setPreviewFile}

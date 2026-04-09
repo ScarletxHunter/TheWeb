@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { getMyGroups } from '../../lib/database';
+import { getMyGroups, getTotalStorageUsed } from '../../lib/database';
+import { formatBytes } from '../../lib/utils';
 import {
   Shield,
   LogOut,
@@ -23,12 +24,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [groups, setGroups] = useState<Group[]>([]);
+  const [storageUsed, setStorageUsed] = useState(0);
 
   const currentSpace = searchParams.get('space') || 'personal';
   const currentGroupId = searchParams.get('groupId');
 
   useEffect(() => {
     getMyGroups().then(setGroups);
+    getTotalStorageUsed().then(setStorageUsed);
   }, []);
 
   const navLinks = [
@@ -123,6 +126,32 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             );
           })}
         </nav>
+
+        {/* Storage quota */}
+        <div className="border-t border-gray-800 px-4 py-3">
+          {(() => {
+            const maxStorage = 1024 * 1024 * 1024;
+            const pct = Math.min((storageUsed / maxStorage) * 100, 100);
+            return (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs text-gray-500">Storage</span>
+                  <span className="text-xs text-gray-500">
+                    {formatBytes(storageUsed)} / {formatBytes(maxStorage)}
+                  </span>
+                </div>
+                <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-indigo-500'
+                    }`}
+                    style={{ width: `${Math.max(pct, 1)}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
+        </div>
 
         {/* User info */}
         <div className="border-t border-gray-800 p-4">
