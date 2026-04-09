@@ -16,9 +16,9 @@ export function Layout({ children }: LayoutProps) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-950 flex">
+    <div className="h-dvh bg-gray-950 flex overflow-hidden">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <main className="flex-1 flex flex-col min-w-0 pb-20 lg:pb-0">
+      <main className="flex-1 flex flex-col min-w-0 pb-16 lg:pb-0 overflow-hidden">
         {children}
       </main>
       <BottomNav />

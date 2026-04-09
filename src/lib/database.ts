@@ -186,6 +186,34 @@ export async function getTotalFileCount(): Promise<number> {
   return count ?? 0;
 }
 
+export async function getStoragePerUser(): Promise<{ user_id: string; display_name: string | null; email: string; total_size: number; file_count: number }[]> {
+  const { data: files } = await supabase
+    .from('files')
+    .select('uploaded_by, size, profiles(display_name, email)');
+  if (!files) return [];
+
+  const map = new Map<string, { display_name: string | null; email: string; total_size: number; file_count: number }>();
+  for (const f of files as any[]) {
+    const uid = f.uploaded_by;
+    if (!uid) continue;
+    const existing = map.get(uid);
+    if (existing) {
+      existing.total_size += f.size || 0;
+      existing.file_count += 1;
+    } else {
+      map.set(uid, {
+        display_name: f.profiles?.display_name || null,
+        email: f.profiles?.email || uid,
+        total_size: f.size || 0,
+        file_count: 1,
+      });
+    }
+  }
+  return Array.from(map.entries())
+    .map(([user_id, data]) => ({ user_id, ...data }))
+    .sort((a, b) => b.total_size - a.total_size);
+}
+
 // ── Folders ──
 
 export async function getFolders(parentId: string | null, context?: { type: 'personal'; userId: string } | { type: 'group'; groupId: string }): Promise<Folder[]> {

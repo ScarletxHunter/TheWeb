@@ -135,7 +135,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             return (
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs text-gray-500">Storage</span>
+                  <span className="text-xs text-gray-500">Site Storage</span>
                   <span className="text-xs text-gray-500">
                     {formatBytes(storageUsed)} / {formatBytes(maxStorage)}
                   </span>
