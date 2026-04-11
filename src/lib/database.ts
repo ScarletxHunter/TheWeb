@@ -174,7 +174,8 @@ export async function getAllFolders(): Promise<Folder[]> {
 export async function getTotalStorageUsed(): Promise<number> {
   const { data } = await supabase
     .from('files')
-    .select('size');
+    .select('size')
+    .is('deleted_at', null);
   if (!data) return 0;
   return data.reduce((sum, f) => sum + (f.size || 0), 0);
 }
@@ -182,14 +183,16 @@ export async function getTotalStorageUsed(): Promise<number> {
 export async function getTotalFileCount(): Promise<number> {
   const { count } = await supabase
     .from('files')
-    .select('*', { count: 'exact', head: true });
+    .select('*', { count: 'exact', head: true })
+    .is('deleted_at', null);
   return count ?? 0;
 }
 
 export async function getStoragePerUser(): Promise<{ user_id: string; display_name: string | null; email: string; total_size: number; file_count: number }[]> {
   const { data: files } = await supabase
     .from('files')
-    .select('uploaded_by, size, profiles(display_name, email)');
+    .select('uploaded_by, size, profiles(display_name, email)')
+    .is('deleted_at', null);
   if (!files) return [];
 
   const map = new Map<string, { display_name: string | null; email: string; total_size: number; file_count: number }>();
