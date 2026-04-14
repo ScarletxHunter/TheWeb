@@ -20,10 +20,9 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFiles = useCallback(
-    async (fileList: FileList | File[], folderMap?: Map<string, string>) => {
+  const uploadFilesToStorage = useCallback(
+    async (files: File[], folderMap: Map<number, string>) => {
       if (!user) return;
-      const files = Array.from(fileList);
 
       const newUploads: UploadProgress[] = files.map((f) => ({
         file: f,
@@ -34,10 +33,8 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const storagePath = `${user.id}/${Date.now()}-${file.name}`;
-
-        // Determine which folder this file belongs to
-        const targetFolderId = folderMap?.get((file as any).webkitRelativePath || file.name) ?? folderId;
+        const storagePath = `${user.id}/${Date.now()}-${i}-${file.name}`;
+        const targetFolderId = folderMap.get(i) ?? folderId;
 
         setUploads((prev) =>
           prev.map((u) =>
@@ -95,27 +92,36 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
     [user, folderId, onUploadComplete, groupId]
   );
 
+  const handleFiles = useCallback(
+    async (fileList: FileList | File[]) => {
+      const files = Array.from(fileList);
+      // All files go to current folder (no folder structure)
+      const folderMap = new Map<number, string>();
+      // No entries = all files use folderId fallback
+      await uploadFilesToStorage(files, folderMap);
+    },
+    [uploadFilesToStorage]
+  );
+
   const handleFolderUpload = useCallback(
     async (fileList: FileList) => {
       if (!user) return;
       const files = Array.from(fileList);
       if (files.length === 0) return;
 
+      toast(`Creating folders and uploading ${files.length} files...`);
+
       // Build folder structure from webkitRelativePath
-      // e.g. "MyFolder/subfolder/file.txt" => create MyFolder, then subfolder inside it
-      const folderIdCache = new Map<string, string>(); // path => created folder id
-      const fileToFolderMap = new Map<string, string>(); // relativePath => folderId
+      const folderIdCache = new Map<string, string>(); // "RootFolder/sub" => db folder id
+      const indexToFolderMap = new Map<number, string>(); // file index => target folder id
 
-      toast(`Uploading folder with ${files.length} files...`);
-
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         const relativePath = (file as any).webkitRelativePath as string;
         if (!relativePath) continue;
 
         const parts = relativePath.split('/');
-        // parts = ["RootFolder", "subfolder", "file.txt"]
-        // We need to create folders for all parts except the last (the file)
-        const folderParts = parts.slice(0, -1);
+        const folderParts = parts.slice(0, -1); // everything except filename
 
         let parentId = folderId;
         for (let depth = 0; depth < folderParts.length; depth++) {
@@ -137,13 +143,14 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
           }
         }
 
-        fileToFolderMap.set(relativePath, parentId!);
+        if (parentId) {
+          indexToFolderMap.set(i, parentId);
+        }
       }
 
-      // Now upload all files into their respective folders
-      await handleFiles(files, fileToFolderMap);
+      await uploadFilesToStorage(files, indexToFolderMap);
     },
-    [user, folderId, groupId, handleFiles]
+    [user, folderId, groupId, uploadFilesToStorage]
   );
 
   const handleDrop = useCallback(
@@ -222,7 +229,15 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
           }
 
           if (allFiles.length > 0) {
-            await handleFiles(allFiles, fileToFolderMap);
+            // Build index-based map from relativePath-based map
+            const indexMap = new Map<number, string>();
+            allFiles.forEach((file, idx) => {
+              const rel = (file as any).webkitRelativePath as string;
+              if (rel && fileToFolderMap.has(rel)) {
+                indexMap.set(idx, fileToFolderMap.get(rel)!);
+              }
+            });
+            await uploadFilesToStorage(allFiles, indexMap);
           }
           return;
         }

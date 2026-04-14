@@ -13,8 +13,8 @@ import { ShareLinkModal } from '../components/sharing/ShareLinkModal';
 import { FilePreviewModal } from '../components/files/FilePreviewModal';
 import { MoveToFolderModal } from '../components/files/MoveToFolderModal';
 import { FolderOpen, Trash2, X, Download, FolderInput, Upload, CloudOff } from 'lucide-react';
-import { trashFile, trashFiles, renameFile } from '../lib/database';
-import { downloadFile } from '../lib/storage';
+import { trashFile, trashFiles, renameFile, deleteFileRecords } from '../lib/database';
+import { downloadFile, deleteFile } from '../lib/storage';
 import toast from 'react-hot-toast';
 import type { FileRecord } from '../types';
 import type { ViewMode, SortField, SortOrder } from '../components/layout/Header';
@@ -142,6 +142,19 @@ export function Dashboard() {
     else { toast.success(`${selectedIds.size} file(s) moved to trash`); clearSelection(); refreshFiles(); }
   };
 
+  const handleBulkDelete = async () => {
+    if (!confirm(`PERMANENTLY delete ${selectedIds.size} file(s)? This cannot be undone.`)) return;
+    const selected = files.filter(f => selectedIds.has(f.id));
+    // Delete from storage
+    for (const file of selected) {
+      await deleteFile(file.storage_path);
+    }
+    // Delete from database
+    const { error } = await deleteFileRecords([...selectedIds]);
+    if (error) toast.error('Failed to delete files');
+    else { toast.success(`${selectedIds.size} file(s) permanently deleted`); clearSelection(); refreshFiles(); }
+  };
+
   const handleBulkDownload = async () => {
     const selected = files.filter(f => selectedIds.has(f.id));
     for (const file of selected) {
@@ -232,6 +245,9 @@ export function Dashboard() {
           </button>
           <button onClick={handleBulkTrash} className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 cursor-pointer">
             <Trash2 className="w-3.5 h-3.5" /> Trash
+          </button>
+          <button onClick={handleBulkDelete} className="flex items-center gap-1.5 text-xs text-red-500 hover:text-red-400 px-2.5 py-1.5 rounded-lg bg-red-950 hover:bg-red-900 cursor-pointer">
+            <Trash2 className="w-3.5 h-3.5" /> Delete Forever
           </button>
           <button onClick={clearSelection} className="p-1.5 text-gray-500 hover:text-white cursor-pointer">
             <X className="w-4 h-4" />

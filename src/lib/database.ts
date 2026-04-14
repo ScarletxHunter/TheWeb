@@ -98,6 +98,14 @@ export async function deleteFileRecord(fileId: string) {
   return { error: error?.message ?? null };
 }
 
+export async function deleteFileRecords(fileIds: string[]) {
+  const { error } = await supabase
+    .from('files')
+    .delete()
+    .in('id', fileIds);
+  return { error: error?.message ?? null };
+}
+
 // Soft-delete a file (move to trash)
 export async function trashFile(fileId: string) {
   const { error } = await supabase

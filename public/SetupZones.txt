@@ -1,0 +1,66 @@
+-- PASTE THIS INTO STUDIO COMMAND BAR
+-- It DOES NOT create walls — it only creates FOLDERS and MOVES your existing walls into them
+-- Your WallCommon1, WallRare1 etc stay exactly as they are, just organized into folders
+-- Safe to re-run
+
+local TIERS = { "Common", "Rare", "Epic", "Legendary", "Mythic" }
+
+local TIER_COLORS = {
+	Common    = Color3.fromRGB(110, 255, 112),
+	Rare      = Color3.fromRGB(53, 180, 255),
+	Epic      = Color3.fromRGB(192, 88, 255),
+	Legendary = Color3.fromRGB(255, 212, 87),
+	Mythic    = Color3.fromRGB(255, 74, 74),
+}
+
+local ZONE_REQUIRED_SPEED = {
+	Common    = 16,
+	Rare      = 32,
+	Epic      = 58,
+	Legendary = 96,
+	Mythic    = 150,
+}
+
+local function findOrCreate(parent, name, className)
+	local existing = parent:FindFirstChild(name)
+	if existing then return existing, false end
+	local obj = Instance.new(className)
+	obj.Name = name
+	obj.Parent = parent
+	return obj, true
+end
+
+-- 1. Create Zones folder
+local zonesFolder, createdZones = findOrCreate(workspace, "Zones", "Folder")
+print("[SetupZones] " .. (createdZones and "Created" or "Found") .. " Workspace.Zones")
+
+-- 2. Create zone subfolders
+for _, tier in ipairs(TIERS) do
+	local zoneName = tier .. "Zone"
+	local zoneFolder = findOrCreate(zonesFolder, zoneName, "Folder")
+	zoneFolder:SetAttribute("Tier", tier)
+	zoneFolder:SetAttribute("RequiredSpeed", ZONE_REQUIRED_SPEED[tier])
+
+	findOrCreate(zoneFolder, "Walls", "Folder")
+	findOrCreate(zoneFolder, "SpawnPads", "Folder")
+	findOrCreate(zoneFolder, "Floor", "Folder")
+	print("[SetupZones] Ready: " .. zoneName)
+end
+
+-- 3. Move existing WallCommon1, WallRare1 etc INTO zone folders (does NOT create new walls)
+local movedCount = 0
+for _, obj in ipairs(workspace:GetChildren()) do
+	for _, tier in ipairs(TIERS) do
+		local pattern = "Wall" .. tier
+		if obj.Name:sub(1, #pattern) == pattern then
+			local wallsFolder = zonesFolder:FindFirstChild(tier .. "Zone"):FindFirstChild("Walls")
+			if wallsFolder then
+				obj.Parent = wallsFolder
+				movedCount += 1
+				print("[SetupZones] Moved " .. obj.Name .. " -> " .. tier .. "Zone/Walls/")
+			end
+		end
+	end
+end
+
+print("[SetupZones] Done! Moved " .. movedCount .. " wall groups. Now add floor parts and spawn pads to each zone.")
