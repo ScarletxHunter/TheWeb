@@ -134,25 +134,63 @@ export function Dashboard() {
   const clearSelection = () => setSelectedIds(new Set());
   const selectAll = () => setSelectedIds(new Set(files.map(f => f.id)));
 
-  // Bulk actions
+  // Bulk actions — batch in chunks to avoid Supabase limits
+  const BATCH_SIZE = 50;
+
   const handleBulkTrash = async () => {
-    if (!confirm(`Move ${selectedIds.size} file(s) to trash?`)) return;
-    const { error } = await trashFiles([...selectedIds]);
-    if (error) toast.error('Failed to trash files');
-    else { toast.success(`${selectedIds.size} file(s) moved to trash`); clearSelection(); refreshFiles(); }
+    const count = selectedIds.size;
+    if (!confirm(`Move ${count} file(s) to trash?`)) return;
+    const ids = [...selectedIds];
+    const toastId = toast.loading(`Trashing 0/${count}...`);
+    let failed = 0;
+
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      const { error } = await trashFiles(batch);
+      if (error) {
+        console.error('Trash batch failed:', error);
+        failed += batch.length;
+      }
+      toast.loading(`Trashing ${Math.min(i + BATCH_SIZE, ids.length)}/${count}...`, { id: toastId });
+    }
+
+    if (failed > 0) toast.error(`Failed to trash ${failed} file(s)`, { id: toastId });
+    else toast.success(`${count} file(s) moved to trash`, { id: toastId });
+    clearSelection();
+    refreshFiles();
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`PERMANENTLY delete ${selectedIds.size} file(s)? This cannot be undone.`)) return;
+    const count = selectedIds.size;
+    if (!confirm(`PERMANENTLY delete ${count} file(s)? This cannot be undone.`)) return;
     const selected = files.filter(f => selectedIds.has(f.id));
-    // Delete from storage
-    for (const file of selected) {
-      await deleteFile(file.storage_path);
+    const toastId = toast.loading(`Deleting 0/${count}...`);
+    let failed = 0;
+
+    // Delete from storage in batches
+    for (let i = 0; i < selected.length; i++) {
+      await deleteFile(selected[i].storage_path);
+      if ((i + 1) % 10 === 0) {
+        toast.loading(`Removing storage ${i + 1}/${count}...`, { id: toastId });
+      }
     }
-    // Delete from database
-    const { error } = await deleteFileRecords([...selectedIds]);
-    if (error) toast.error('Failed to delete files');
-    else { toast.success(`${selectedIds.size} file(s) permanently deleted`); clearSelection(); refreshFiles(); }
+
+    // Delete from database in batches
+    const ids = [...selectedIds];
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      const { error } = await deleteFileRecords(batch);
+      if (error) {
+        console.error('Delete batch failed:', error);
+        failed += batch.length;
+      }
+      toast.loading(`Deleting records ${Math.min(i + BATCH_SIZE, ids.length)}/${count}...`, { id: toastId });
+    }
+
+    if (failed > 0) toast.error(`Failed to delete ${failed} file(s)`, { id: toastId });
+    else toast.success(`${count} file(s) permanently deleted`, { id: toastId });
+    clearSelection();
+    refreshFiles();
   };
 
   const handleBulkDownload = async () => {
