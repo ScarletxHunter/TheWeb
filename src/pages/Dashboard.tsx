@@ -310,9 +310,23 @@ export function Dashboard() {
         {/* Files */}
         {!loading && sortedFiles.length > 0 && (
           <div>
-            <h2 className="text-sm font-medium text-gray-400 mb-3">
-              Files ({sortedFiles.length})
-            </h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-medium text-gray-400">
+                Files ({sortedFiles.length})
+              </h2>
+              <button
+                onClick={() => {
+                  if (selectedIds.size === files.length && files.length > 0) {
+                    clearSelection();
+                  } else {
+                    selectAll();
+                  }
+                }}
+                className="text-xs text-indigo-400 hover:text-indigo-300 px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 cursor-pointer transition-colors"
+              >
+                {selectedIds.size === files.length && files.length > 0 ? 'Deselect All' : `Select All (${files.length})`}
+              </button>
+            </div>
             <FileGrid
               files={sortedFiles}
               onRefresh={refreshFiles}
