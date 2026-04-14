@@ -74,21 +74,19 @@ export function FileListItem({
       onClick={handleClick}
       onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true); }}
     >
-      {/* Checkbox */}
-      {selectionMode && (
-        <div
-          className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer ${
-            selected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-600 bg-gray-800'
-          }`}
-          onClick={(e) => { e.stopPropagation(); onSelect?.(e.shiftKey); }}
-        >
-          {selected && (
-            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-            </svg>
-          )}
-        </div>
-      )}
+      {/* Checkbox — always visible on hover, always visible in selection mode */}
+      <div
+        className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-opacity ${
+          selected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-600 bg-gray-800 hover:border-gray-400'
+        } ${selectionMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+        onClick={(e) => { e.stopPropagation(); onSelect?.(e.shiftKey); }}
+      >
+        {selected && (
+          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+          </svg>
+        )}
+      </div>
 
       {/* Icon */}
       <div className={`w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center flex-shrink-0 ${colorClass}`}>

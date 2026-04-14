@@ -90,16 +90,17 @@ export function FileCard({
       onClick={handleCardClick}
       onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true); }}
     >
-      {/* Selection checkbox */}
-      {selectionMode && (
-        <div className="absolute top-2 left-2 z-10">
-          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-            selected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-600 bg-gray-800'
-          }`}>
-            {selected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-          </div>
+      {/* Selection checkbox — always visible on hover, always visible in selection mode */}
+      <div
+        className={`absolute top-2 left-2 z-10 ${selectionMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}
+        onClick={(e) => { e.stopPropagation(); onSelect?.(e.shiftKey); }}
+      >
+        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors cursor-pointer ${
+          selected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-600 bg-gray-800 hover:border-gray-400'
+        }`}>
+          {selected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
         </div>
-      )}
+      </div>
 
       {/* Menu button */}
       <div className="absolute top-2 right-2 sm:top-3 sm:right-3">
