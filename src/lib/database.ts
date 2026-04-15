@@ -199,6 +199,25 @@ export async function getTotalStorageUsed(): Promise<number> {
   return data.reduce((sum, f) => sum + (f.size || 0), 0);
 }
 
+// Project-wide usage (admin only — function enforces the role check).
+export interface ProjectUsage {
+  db_bytes: number;
+  storage_bytes: number;
+  file_count: number;
+  user_count: number;
+}
+export async function getProjectUsage(): Promise<ProjectUsage | null> {
+  const { data, error } = await supabase.rpc('get_project_usage');
+  if (error || !data || !data[0]) return null;
+  const row = data[0];
+  return {
+    db_bytes: Number(row.db_bytes),
+    storage_bytes: Number(row.storage_bytes),
+    file_count: Number(row.file_count),
+    user_count: Number(row.user_count),
+  };
+}
+
 // Storage used by a specific user's own uploads (counts against their quota).
 export async function getMyStorageUsed(userId: string): Promise<number> {
   const { data } = await supabase
