@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { getMyGroups, getTotalStorageUsed } from '../../lib/database';
+import { getMyGroups, getMyStorageUsed } from '../../lib/database';
 import { formatBytes } from '../../lib/utils';
 import {
   Shield,
@@ -20,7 +20,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ open, onClose }: SidebarProps) {
-  const { profile, isAdmin, signOut } = useAuth();
+  const { user, profile, isAdmin, signOut } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [groups, setGroups] = useState<Group[]>([]);
@@ -31,8 +31,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   useEffect(() => {
     getMyGroups().then(setGroups);
-    getTotalStorageUsed().then(setStorageUsed);
-  }, []);
+    if (user) getMyStorageUsed(user.id).then(setStorageUsed);
+  }, [user]);
 
   const navLinks = [
     { to: '/trash', icon: Trash2, label: 'Trash' },
@@ -130,12 +130,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         {/* Storage quota */}
         <div className="border-t border-gray-800 px-4 py-3">
           {(() => {
-            const maxStorage = 1024 * 1024 * 1024;
+            const maxStorage = profile?.quota_bytes ?? 1024 * 1024 * 1024;
             const pct = Math.min((storageUsed / maxStorage) * 100, 100);
             return (
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs text-gray-500">Site Storage</span>
+                  <span className="text-xs text-gray-500">My Storage</span>
                   <span className="text-xs text-gray-500">
                     {formatBytes(storageUsed)} / {formatBytes(maxStorage)}
                   </span>
