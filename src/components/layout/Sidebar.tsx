@@ -11,7 +11,9 @@ import {
   Users,
   HardDrive,
   X,
+  Pencil,
 } from 'lucide-react';
+import { EditProfileModal } from './EditProfileModal';
 import type { Group } from '../../types';
 
 interface SidebarProps {
@@ -25,6 +27,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const [searchParams] = useSearchParams();
   const [groups, setGroups] = useState<Group[]>([]);
   const [storageUsed, setStorageUsed] = useState(0);
+  const [editOpen, setEditOpen] = useState(false);
 
   const currentSpace = searchParams.get('space') || 'personal';
   const currentGroupId = searchParams.get('groupId');
@@ -64,6 +67,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </button>
         </div>
 
+        {/* Scrollable middle section so the storage + user footer
+            stay pinned even with many groups. */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
         {/* Spaces */}
         <div className="px-3 py-3 border-b border-gray-800">
           <p className="px-3 mb-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">Spaces</p>
@@ -106,7 +112,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-3 space-y-1">
+        <nav className="px-3 py-3 space-y-1">
           {navLinks.map((link) => {
             const active = location.pathname === link.to;
             return (
@@ -126,6 +132,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             );
           })}
         </nav>
+        </div>
+        {/* /scroll wrapper */}
 
         {/* Storage quota */}
         <div className="border-t border-gray-800 px-4 py-3">
@@ -155,8 +163,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
         {/* User info */}
         <div className="border-t border-gray-800 p-4">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-9 h-9 rounded-full bg-gray-700 flex items-center justify-center text-white text-sm font-medium">
+          <button
+            onClick={() => setEditOpen(true)}
+            className="flex items-center gap-3 mb-3 w-full text-left hover:bg-gray-800 rounded-lg p-1 -m-1 transition-colors cursor-pointer group"
+            title="Edit profile"
+          >
+            <div className="w-9 h-9 rounded-full bg-gray-700 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
               {(profile?.display_name || profile?.email || '?')[0].toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
@@ -165,7 +177,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               </p>
               <p className="text-xs text-gray-500 truncate">{profile?.email}</p>
             </div>
-          </div>
+            <Pencil className="w-3.5 h-3.5 text-gray-500 group-hover:text-gray-300 flex-shrink-0" />
+          </button>
           <button
             onClick={signOut}
             className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-colors cursor-pointer"
@@ -175,6 +188,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </button>
         </div>
       </aside>
+
+      <EditProfileModal open={editOpen} onClose={() => setEditOpen(false)} />
     </>
   );
 }

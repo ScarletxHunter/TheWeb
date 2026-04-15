@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Upload, X, FolderUp } from 'lucide-react';
 import { uploadFile } from '../../lib/storage';
 import { createFileRecord, createFolder, getMyStorageUsed } from '../../lib/database';
@@ -19,6 +19,13 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  // Mobile + button → open the native file picker directly.
+  useEffect(() => {
+    const open = () => fileInputRef.current?.click();
+    window.addEventListener('open-upload-picker', open);
+    return () => window.removeEventListener('open-upload-picker', open);
+  }, []);
 
   const uploadFilesToStorage = useCallback(
     async (files: File[], folderMap: Map<number, string>) => {

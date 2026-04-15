@@ -8,12 +8,14 @@ export function BottomNav() {
   const navigate = useNavigate();
 
   const handleUploadClick = () => {
+    const fire = () => window.dispatchEvent(new CustomEvent('open-upload-picker'));
     if (location.pathname !== '/') {
       navigate('/');
+      // Dashboard mounts then registers the listener — wait a tick.
+      setTimeout(fire, 150);
+    } else {
+      fire();
     }
-    setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('scroll-to-upload'));
-    }, 100);
   };
 
   const tabs = [
