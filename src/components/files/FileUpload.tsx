@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Upload, X, FolderUp } from 'lucide-react';
-import { uploadFile } from '../../lib/storage';
+import { uploadFile, compressImage } from '../../lib/storage';
 import { createFileRecord, createFolder, getMyStorageUsed } from '../../lib/database';
 import { useAuth } from '../../context/AuthContext';
 import { formatBytes } from '../../lib/utils';
@@ -50,52 +50,65 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
       }));
       setUploads((prev) => [...prev, ...newUploads]);
 
+      // Plan limit — update MAX_FILE_BYTES to 1 073 741 824 (1 GB) after upgrading to Supabase Pro
+      const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB (free tier)
+
       for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const storagePath = `${user.id}/${Date.now()}-${i}-${file.name}`;
+        const rawFile = files[i];
         const targetFolderId = folderMap.get(i) ?? folderId;
 
-        // Hard-limit check — Supabase free tier caps uploads at 50 MB
-        const MAX_FILE_BYTES = 50 * 1024 * 1024;
-        if (file.size > MAX_FILE_BYTES) {
+        // Hard-limit check before attempting upload
+        if (rawFile.size > MAX_FILE_BYTES) {
           setUploads((prev) =>
             prev.map((u) =>
-              u.file === file
-                ? { ...u, status: 'error' as const, error: 'Exceeds 50 MB limit' }
+              u.file === rawFile
+                ? { ...u, status: 'error' as const, error: 'Exceeds plan limit' }
                 : u
             )
           );
           toast.error(
-            `"${file.name}" is ${formatBytes(file.size)} — Supabase free tier limits files to 50 MB. Upgrade to Pro for larger uploads.`,
+            `"${rawFile.name}" is ${formatBytes(rawFile.size)} — your plan allows up to ${formatBytes(MAX_FILE_BYTES)} per file.`,
             { duration: 7000 }
           );
           continue;
         }
 
+        // Auto-compress images (canvas resize + quality reduction, lossless skip if result is larger)
+        let file = rawFile;
+        if (rawFile.type.startsWith('image/') && rawFile.type !== 'image/gif' && rawFile.type !== 'image/svg+xml') {
+          file = await compressImage(rawFile);
+          if (file.size < rawFile.size) {
+            const saved = formatBytes(rawFile.size - file.size);
+            toast(`📸 "${file.name}" compressed — saved ${saved}`, { duration: 3000 });
+          }
+        }
+
+        const storagePath = `${user.id}/${Date.now()}-${i}-${file.name}`;
+
         setUploads((prev) =>
           prev.map((u) =>
-            u.file === file ? { ...u, status: 'uploading' as const } : u
+            u.file === rawFile ? { ...u, status: 'uploading' as const } : u
           )
         );
 
         const { error } = await uploadFile(file, storagePath, (progress) => {
           setUploads((prev) =>
-            prev.map((u) => (u.file === file ? { ...u, progress } : u))
+            prev.map((u) => (u.file === rawFile ? { ...u, progress } : u))
           );
         });
 
         if (error) {
           setUploads((prev) =>
             prev.map((u) =>
-              u.file === file ? { ...u, status: 'error' as const, error } : u
+              u.file === rawFile ? { ...u, status: 'error' as const, error } : u
             )
           );
-          toast.error(`Failed to upload ${file.name}`);
+          toast.error(`Failed to upload ${rawFile.name}: ${error}`);
           continue;
         }
 
         const { error: dbError } = await createFileRecord({
-          name: file.name,
+          name: rawFile.name,
           storage_path: storagePath,
           size: file.size,
           mime_type: file.type || 'application/octet-stream',
@@ -107,14 +120,14 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
         if (dbError) {
           setUploads((prev) =>
             prev.map((u) =>
-              u.file === file ? { ...u, status: 'error' as const, error: dbError } : u
+              u.file === rawFile ? { ...u, status: 'error' as const, error: dbError } : u
             )
           );
-          toast.error(`Failed to save ${file.name}`);
+          toast.error(`Failed to save ${rawFile.name}`);
         } else {
           setUploads((prev) =>
             prev.map((u) =>
-              u.file === file ? { ...u, status: 'done' as const, progress: 100 } : u
+              u.file === rawFile ? { ...u, status: 'done' as const, progress: 100 } : u
             )
           );
         }
