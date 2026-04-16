@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Download, Share2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { downloadFile } from '../../lib/storage';
+import { downloadFile, fetchBlobAndDownload } from '../../lib/storage';
 import { formatBytes } from '../../lib/utils';
 import type { FileRecord } from '../../types';
 
@@ -26,12 +26,17 @@ export function FilePreviewModal({ file, files, onClose, onShare, onNavigate }: 
     load();
   }, [file.storage_path]);
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!url) return;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = file.name;
-    a.click();
+    try {
+      await fetchBlobAndDownload(url, file.name);
+    } catch {
+      // Fallback: direct link (won't download on iOS but better than silence)
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.name;
+      a.click();
+    }
   };
 
   const currentIndex = files?.findIndex(f => f.id === file.id) ?? -1;

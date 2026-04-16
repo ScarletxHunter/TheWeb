@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Download, Trash2, Share2, MoreVertical, Pencil, Eye, FolderInput } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { downloadFile } from '../../lib/storage';
+import { downloadFile, blobDownload } from '../../lib/storage';
 import { formatBytes, formatDate, getFileIcon, getFileColor } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import type { FileRecord } from '../../types';
@@ -54,15 +54,8 @@ export function FileCard({
 
   const handleDownload = async () => {
     setDownloading(true);
-    const { url, error } = await downloadFile(file.storage_path);
-    if (error) {
-      toast.error('Download failed');
-    } else {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = file.name;
-      a.click();
-    }
+    const { error } = await blobDownload(file.storage_path, file.name);
+    if (error) toast.error('Download failed');
     setDownloading(false);
   };
 

@@ -14,7 +14,7 @@ import { FilePreviewModal } from '../components/files/FilePreviewModal';
 import { MoveToFolderModal } from '../components/files/MoveToFolderModal';
 import { FolderOpen, Trash2, X, Download, FolderInput, Upload, CloudOff } from 'lucide-react';
 import { trashFile, trashFiles, renameFile, deleteFileRecords } from '../lib/database';
-import { downloadFile, deleteFile } from '../lib/storage';
+import { blobDownload, deleteFile } from '../lib/storage';
 import toast from 'react-hot-toast';
 import type { FileRecord } from '../types';
 import type { ViewMode, SortField, SortOrder } from '../components/layout/Header';
@@ -210,16 +210,13 @@ export function Dashboard() {
 
   const handleBulkDownload = async () => {
     const selected = files.filter(f => selectedIds.has(f.id));
+    let failed = 0;
     for (const file of selected) {
-      const { url } = await downloadFile(file.storage_path);
-      if (url) {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.name;
-        a.click();
-      }
+      const { error } = await blobDownload(file.storage_path, file.name);
+      if (error) failed++;
     }
-    toast.success(`Downloading ${selected.length} file(s)`);
+    if (failed > 0) toast.error(`${failed} file(s) failed to download`);
+    else toast.success(`Downloading ${selected.length} file(s)`);
   };
 
   // Single file actions
