@@ -1,58 +1,144 @@
+import * as tus from 'tus-js-client';
 import { supabase } from './supabase';
 
 const BUCKET = 'vault-files';
 
+// ---------------------------------------------------------------------------
+// Image compression (canvas-based, no external library)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compress an image file using an off-screen canvas.
+ * - Skips GIFs (animation would be lost) and SVGs.
+ * - Scales down if either dimension exceeds maxDimension.
+ * - Only returns the compressed blob if it's actually smaller.
+ */
+export async function compressImage(
+  file: File,
+  maxDimension = 2048,
+  quality = 0.82,
+): Promise<File> {
+  if (!file.type.startsWith('image/')) return file;
+  if (file.type === 'image/gif' || file.type === 'image/svg+xml') return file;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      let { width, height } = img;
+
+      // Scale proportionally if either side exceeds the limit
+      if (width > maxDimension || height > maxDimension) {
+        if (width >= height) {
+          height = Math.round((height / width) * maxDimension);
+          width = maxDimension;
+        } else {
+          width = Math.round((width / height) * maxDimension);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(file); return; }
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Keep PNG as PNG to preserve transparency; everything else → JPEG
+      const outputMime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob || blob.size >= file.size) { resolve(file); return; }
+          resolve(new File([blob], file.name, { type: outputMime, lastModified: file.lastModified }));
+        },
+        outputMime,
+        outputMime === 'image/png' ? undefined : quality,
+      );
+    };
+
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); };
+    img.src = objectUrl;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Upload
+// ---------------------------------------------------------------------------
+
+/**
+ * Upload a file using the TUS resumable protocol.
+ * Works for any size; automatically resumes interrupted uploads.
+ * Requires the bucket's file_size_limit to accommodate the file size.
+ */
 export async function uploadFile(
   file: File,
   storagePath: string,
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
 ): Promise<{ path: string; error: string | null }> {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
-
   if (!token) return { path: '', error: 'Not authenticated' };
 
-  const url = `${supabaseUrl}/storage/v1/object/${BUCKET}/${storagePath}`;
-
   return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
-    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    xhr.setRequestHeader('x-upsert', 'false');
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        const pct = Math.round((e.loaded / e.total) * 100);
-        onProgress?.(pct);
-      }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        onProgress?.(100);
-        resolve({ path: storagePath, error: null });
-      } else {
-        // Try to parse Supabase's JSON error body for a helpful message
-        let message = `Upload failed (HTTP ${xhr.status})`;
-        try {
-          const body = JSON.parse(xhr.responseText);
-          if (body?.error) message = body.error;
-          else if (body?.message) message = body.message;
-        } catch { /* ignore parse errors */ }
-        if (xhr.status === 413) {
-          message = 'File too large — Supabase free tier allows up to 50 MB per file.';
+    const upload = new tus.Upload(file, {
+      endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'x-upsert': 'false',
+      },
+      metadata: {
+        bucketName: BUCKET,
+        objectName: storagePath,
+        contentType: file.type || 'application/octet-stream',
+        cacheControl: '3600',
+      },
+      chunkSize: 6 * 1024 * 1024, // 6 MB chunks (Supabase minimum for TUS)
+      onError(err) {
+        let message = err.message || 'Upload failed';
+        // tus wraps HTTP errors; try to extract the status
+        if ('originalResponse' in err) {
+          const resp = (err as any).originalResponse;
+          const status = resp?.getStatus?.() as number | undefined;
+          if (status === 413) {
+            message = 'File too large for your current storage plan.';
+          } else if (status) {
+            try {
+              const body = JSON.parse(resp.getBody?.() ?? '{}');
+              message = body?.error ?? body?.message ?? message;
+            } catch { /* ignore */ }
+          }
         }
         resolve({ path: '', error: message });
-      }
-    };
+      },
+      onProgress(bytesUploaded, bytesTotal) {
+        const pct = bytesTotal ? Math.round((bytesUploaded / bytesTotal) * 100) : 0;
+        onProgress?.(pct);
+      },
+      onSuccess() {
+        onProgress?.(100);
+        resolve({ path: storagePath, error: null });
+      },
+    });
 
-    xhr.onerror = () => resolve({ path: '', error: 'Network error during upload' });
-
-    xhr.send(file);
+    // Resume any previous upload for this file if possible
+    upload.findPreviousUploads().then((prev) => {
+      if (prev.length) upload.resumeFromPreviousUpload(prev[0]);
+      upload.start();
+    });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Download
+// ---------------------------------------------------------------------------
 
 export async function downloadFile(storagePath: string): Promise<{ url: string; error: string | null }> {
   const { data, error } = await supabase.storage
@@ -78,13 +164,11 @@ export async function fetchBlobAndDownload(url: string, filename: string): Promi
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  // Keep the object URL alive briefly so the browser can read it
   setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
 }
 
 /**
  * One-shot helper: get a signed URL then blob-download it.
- * Returns { error } so callers can show a toast on failure.
  */
 export async function blobDownload(
   storagePath: string,
@@ -100,11 +184,12 @@ export async function blobDownload(
   }
 }
 
-export async function deleteFile(storagePath: string): Promise<{ error: string | null }> {
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .remove([storagePath]);
+// ---------------------------------------------------------------------------
+// Delete / public URL
+// ---------------------------------------------------------------------------
 
+export async function deleteFile(storagePath: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.storage.from(BUCKET).remove([storagePath]);
   return { error: error?.message ?? null };
 }
 
