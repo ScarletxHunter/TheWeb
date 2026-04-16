@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Link } from 'react-router-dom';
 import { Globe, Lock, Mail, LogIn } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+import toast from 'react-hot-toast';
 
 export function LoginForm() {
   const { signIn } = useAuth();
@@ -9,6 +11,7 @@ export function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -17,6 +20,21 @@ export function LoginForm() {
     const { error } = await signIn(email, password);
     if (error) setError(error);
     setLoading(false);
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError('Enter your email above first, then tap Forgot password.');
+      return;
+    }
+    setResetLoading(true);
+    setError('');
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setResetLoading(false);
+    if (error) setError(error.message);
+    else toast.success(`Reset link sent to ${email}. Check your inbox.`);
   };
 
   return (
@@ -76,6 +94,15 @@ export function LoginForm() {
           >
             <LogIn className="w-5 h-5" />
             {loading ? 'Signing in...' : 'Sign In'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleForgotPassword}
+            disabled={resetLoading}
+            className="w-full mt-2 text-sm text-gray-400 hover:text-indigo-400 py-1.5 cursor-pointer transition-colors disabled:opacity-50"
+          >
+            {resetLoading ? 'Sending reset email…' : 'Forgot password?'}
           </button>
 
           <p className="text-center text-gray-400 text-sm mt-4">

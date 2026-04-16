@@ -45,7 +45,7 @@ export function Trash() {
 
   return (
     <>
-      <header className="bg-gray-900 border-b border-gray-800 px-4 lg:px-6 py-4 flex items-center gap-4">
+      <header className="bg-gray-900 border-b border-gray-800 px-4 lg:px-6 py-4 flex items-center gap-4 safe-area-pt">
         <button
           onClick={() => window.dispatchEvent(new CustomEvent('toggle-sidebar'))}
           className="lg:hidden text-gray-400 hover:text-white cursor-pointer"

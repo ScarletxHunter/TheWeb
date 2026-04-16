@@ -6,6 +6,7 @@ export interface Profile {
   display_name: string | null;
   role: UserRole;
   created_at: string;
+  quota_bytes: number;
 }
 
 export interface FileRecord {

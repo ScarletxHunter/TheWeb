@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Upload, X, FolderUp } from 'lucide-react';
 import { uploadFile } from '../../lib/storage';
-import { createFileRecord, createFolder } from '../../lib/database';
+import { createFileRecord, createFolder, getMyStorageUsed } from '../../lib/database';
 import { useAuth } from '../../context/AuthContext';
 import { formatBytes } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -14,15 +14,34 @@ interface FileUploadProps {
 }
 
 export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadProps) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
+  // Mobile + button → open the native file picker directly.
+  useEffect(() => {
+    const open = () => fileInputRef.current?.click();
+    window.addEventListener('open-upload-picker', open);
+    return () => window.removeEventListener('open-upload-picker', open);
+  }, []);
+
   const uploadFilesToStorage = useCallback(
     async (files: File[], folderMap: Map<number, string>) => {
       if (!user) return;
+
+      // Quota check before uploading anything
+      const incoming = files.reduce((s, f) => s + f.size, 0);
+      const used = await getMyStorageUsed(user.id);
+      const quota = profile?.quota_bytes ?? 1024 * 1024 * 1024;
+      if (used + incoming > quota) {
+        const over = formatBytes(used + incoming - quota);
+        toast.error(
+          `Quota exceeded by ${over}. Used ${formatBytes(used)} of ${formatBytes(quota)}. Ask an admin to raise your quota.`
+        );
+        return;
+      }
 
       const newUploads: UploadProgress[] = files.map((f) => ({
         file: f,
@@ -89,7 +108,7 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
         setUploads((prev) => prev.filter((u) => u.status !== 'done'));
       }, 2000);
     },
-    [user, folderId, onUploadComplete, groupId]
+    [user, profile, folderId, onUploadComplete, groupId]
   );
 
   const handleFiles = useCallback(

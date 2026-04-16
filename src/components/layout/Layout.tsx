@@ -18,7 +18,7 @@ export function Layout({ children }: LayoutProps) {
   return (
     <div className="h-dvh bg-gray-950 flex overflow-hidden">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <main className="flex-1 flex flex-col min-w-0 pb-16 lg:pb-0 overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 main-bottom-pad overflow-hidden">
         {children}
       </main>
       <BottomNav />

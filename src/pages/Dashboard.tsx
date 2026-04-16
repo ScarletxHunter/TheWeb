@@ -14,7 +14,7 @@ import { FilePreviewModal } from '../components/files/FilePreviewModal';
 import { MoveToFolderModal } from '../components/files/MoveToFolderModal';
 import { FolderOpen, Trash2, X, Download, FolderInput, Upload, CloudOff } from 'lucide-react';
 import { trashFile, trashFiles, renameFile, deleteFileRecords } from '../lib/database';
-import { downloadFile, deleteFile } from '../lib/storage';
+import { blobDownload, deleteFile } from '../lib/storage';
 import toast from 'react-hot-toast';
 import type { FileRecord } from '../types';
 import type { ViewMode, SortField, SortOrder } from '../components/layout/Header';
@@ -146,15 +146,20 @@ export function Dashboard() {
 
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
-      const { error } = await trashFiles(batch);
+      const { error, affected } = await trashFiles(batch);
       if (error) {
         console.error('Trash batch failed:', error);
         failed += batch.length;
+      } else if (affected < batch.length) {
+        // RLS silently filtered out some rows (e.g. files in a group
+        // the user isn't admin of)
+        failed += batch.length - affected;
       }
       toast.loading(`Trashing ${Math.min(i + BATCH_SIZE, ids.length)}/${count}...`, { id: toastId });
     }
 
-    if (failed > 0) toast.error(`Failed to trash ${failed} file(s)`, { id: toastId });
+    if (failed >= count) toast.error(`Couldn't trash any files — you may not have permission`, { id: toastId });
+    else if (failed > 0) toast.error(`Trashed ${count - failed}/${count} — ${failed} skipped (no permission)`, { id: toastId });
     else toast.success(`${count} file(s) moved to trash`, { id: toastId });
     clearSelection();
     refreshFiles();
@@ -167,27 +172,37 @@ export function Dashboard() {
     const toastId = toast.loading(`Deleting 0/${count}...`);
     let failed = 0;
 
-    // Delete from storage in batches
-    for (let i = 0; i < selected.length; i++) {
-      await deleteFile(selected[i].storage_path);
-      if ((i + 1) % 10 === 0) {
-        toast.loading(`Removing storage ${i + 1}/${count}...`, { id: toastId });
-      }
-    }
-
-    // Delete from database in batches
-    const ids = [...selectedIds];
+    // Delete DB rows FIRST (so RLS can reject before we orphan storage),
+    // then delete the corresponding blobs only for rows that were
+    // actually removed.
+    const ids = selected.map(f => f.id);
+    const deletedIds = new Set<string>();
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
-      const { error } = await deleteFileRecords(batch);
+      const { error, affected } = await deleteFileRecords(batch);
       if (error) {
         console.error('Delete batch failed:', error);
         failed += batch.length;
+      } else {
+        if (affected < batch.length) failed += batch.length - affected;
+        // We can't tell which rows succeeded individually; assume the
+        // first `affected` of the batch did. Good enough for cleanup.
+        for (let k = 0; k < affected; k++) deletedIds.add(batch[k]);
       }
       toast.loading(`Deleting records ${Math.min(i + BATCH_SIZE, ids.length)}/${count}...`, { id: toastId });
     }
 
-    if (failed > 0) toast.error(`Failed to delete ${failed} file(s)`, { id: toastId });
+    // Now remove storage blobs for rows that were actually deleted.
+    const toRemove = selected.filter(f => deletedIds.has(f.id));
+    for (let i = 0; i < toRemove.length; i++) {
+      await deleteFile(toRemove[i].storage_path);
+      if ((i + 1) % 10 === 0) {
+        toast.loading(`Removing storage ${i + 1}/${toRemove.length}...`, { id: toastId });
+      }
+    }
+
+    if (failed >= count) toast.error(`Couldn't delete any files — you may not have permission`, { id: toastId });
+    else if (failed > 0) toast.error(`Deleted ${count - failed}/${count} — ${failed} skipped (no permission)`, { id: toastId });
     else toast.success(`${count} file(s) permanently deleted`, { id: toastId });
     clearSelection();
     refreshFiles();
@@ -195,16 +210,13 @@ export function Dashboard() {
 
   const handleBulkDownload = async () => {
     const selected = files.filter(f => selectedIds.has(f.id));
+    let failed = 0;
     for (const file of selected) {
-      const { url } = await downloadFile(file.storage_path);
-      if (url) {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.name;
-        a.click();
-      }
+      const { error } = await blobDownload(file.storage_path, file.name);
+      if (error) failed++;
     }
-    toast.success(`Downloading ${selected.length} file(s)`);
+    if (failed > 0) toast.error(`${failed} file(s) failed to download`);
+    else toast.success(`Downloading ${selected.length} file(s)`);
   };
 
   // Single file actions

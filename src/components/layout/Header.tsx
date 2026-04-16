@@ -45,7 +45,7 @@ export function Header({
   const currentSortLabel = sortOptions.find(s => s.field === sortField)?.label || 'Date';
 
   return (
-    <header className="bg-gray-900 border-b border-gray-800 px-4 lg:px-6 py-3 flex items-center gap-3">
+    <header className="bg-gray-900 border-b border-gray-800 px-4 lg:px-6 py-3 flex items-center gap-3 safe-area-pt">
       <button onClick={onMenuClick} className="lg:hidden text-gray-400 hover:text-white cursor-pointer">
         <Menu className="w-6 h-6" />
       </button>

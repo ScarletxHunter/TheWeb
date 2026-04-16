@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Shield, Eye, Users } from 'lucide-react';
-import { getAllProfiles, updateProfileRole } from '../../lib/database';
+import { Shield, Eye, Users, HardDrive } from 'lucide-react';
+import { getAllProfiles, updateProfileRole, updateProfileQuota } from '../../lib/database';
 import { useAuth } from '../../context/AuthContext';
-import { formatDate } from '../../lib/utils';
+import { formatBytes, formatDate } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import type { Profile } from '../../types';
+
+const GB = 1024 * 1024 * 1024;
 
 export function UserManager() {
   const { user } = useAuth();
@@ -21,6 +23,27 @@ export function UserManager() {
   useEffect(() => {
     loadProfiles();
   }, []);
+
+  const editQuota = async (profile: Profile) => {
+    const currentGb = (profile.quota_bytes ?? GB) / GB;
+    const input = prompt(
+      `Set storage quota for ${profile.display_name || profile.email} (in GB):`,
+      String(currentGb)
+    );
+    if (input === null) return;
+    const gb = parseFloat(input);
+    if (!Number.isFinite(gb) || gb <= 0) {
+      toast.error('Quota must be a positive number');
+      return;
+    }
+    const bytes = Math.round(gb * GB);
+    const { error } = await updateProfileQuota(profile.id, bytes);
+    if (error) toast.error('Failed to update quota');
+    else {
+      toast.success(`Quota set to ${gb} GB`);
+      loadProfiles();
+    }
+  };
 
   const toggleRole = async (profile: Profile) => {
     if (profile.id === user?.id) {
@@ -67,6 +90,14 @@ export function UserManager() {
               <p className="text-xs text-gray-500 truncate">{profile.email}</p>
               <p className="text-xs text-gray-600">Joined {formatDate(profile.created_at)}</p>
             </div>
+            <button
+              onClick={() => editQuota(profile)}
+              title="Edit storage quota"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors cursor-pointer"
+            >
+              <HardDrive className="w-3.5 h-3.5" />
+              {formatBytes(profile.quota_bytes ?? GB)}
+            </button>
             <button
               onClick={() => toggleRole(profile)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${

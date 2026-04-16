@@ -29,6 +29,14 @@ export async function updateProfileRole(userId: string, role: 'admin' | 'viewer'
   return { error: error?.message ?? null };
 }
 
+export async function updateProfileQuota(userId: string, quotaBytes: number) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ quota_bytes: quotaBytes })
+    .eq('id', userId);
+  return { error: error?.message ?? null };
+}
+
 // ── Files ──
 
 export async function getFiles(folderId: string | null, context?: { type: 'personal'; userId: string } | { type: 'group'; groupId: string }): Promise<FileRecord[]> {
@@ -99,11 +107,12 @@ export async function deleteFileRecord(fileId: string) {
 }
 
 export async function deleteFileRecords(fileIds: string[]) {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('files')
     .delete()
-    .in('id', fileIds);
-  return { error: error?.message ?? null };
+    .in('id', fileIds)
+    .select('id');
+  return { error: error?.message ?? null, affected: data?.length ?? 0 };
 }
 
 // Soft-delete a file (move to trash)
@@ -115,13 +124,15 @@ export async function trashFile(fileId: string) {
   return { error: error?.message ?? null };
 }
 
-// Trash multiple files
+// Trash multiple files. Returns affected count so callers can detect
+// rows silently filtered out by RLS (which return error=null).
 export async function trashFiles(fileIds: string[]) {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('files')
     .update({ deleted_at: new Date().toISOString() })
-    .in('id', fileIds);
-  return { error: error?.message ?? null };
+    .in('id', fileIds)
+    .select('id');
+  return { error: error?.message ?? null, affected: data?.length ?? 0 };
 }
 
 // Restore a file from trash
@@ -183,6 +194,36 @@ export async function getTotalStorageUsed(): Promise<number> {
   const { data } = await supabase
     .from('files')
     .select('size')
+    .is('deleted_at', null);
+  if (!data) return 0;
+  return data.reduce((sum, f) => sum + (f.size || 0), 0);
+}
+
+// Project-wide usage (admin only — function enforces the role check).
+export interface ProjectUsage {
+  db_bytes: number;
+  storage_bytes: number;
+  file_count: number;
+  user_count: number;
+}
+export async function getProjectUsage(): Promise<ProjectUsage | null> {
+  const { data, error } = await supabase.rpc('get_project_usage');
+  if (error || !data || !data[0]) return null;
+  const row = data[0];
+  return {
+    db_bytes: Number(row.db_bytes),
+    storage_bytes: Number(row.storage_bytes),
+    file_count: Number(row.file_count),
+    user_count: Number(row.user_count),
+  };
+}
+
+// Storage used by a specific user's own uploads (counts against their quota).
+export async function getMyStorageUsed(userId: string): Promise<number> {
+  const { data } = await supabase
+    .from('files')
+    .select('size')
+    .eq('uploaded_by', userId)
     .is('deleted_at', null);
   if (!data) return 0;
   return data.reduce((sum, f) => sum + (f.size || 0), 0);
