@@ -34,7 +34,17 @@ export async function uploadFile(
         onProgress?.(100);
         resolve({ path: storagePath, error: null });
       } else {
-        resolve({ path: '', error: `Upload failed: ${xhr.statusText || 'Unknown error'}` });
+        // Try to parse Supabase's JSON error body for a helpful message
+        let message = `Upload failed (HTTP ${xhr.status})`;
+        try {
+          const body = JSON.parse(xhr.responseText);
+          if (body?.error) message = body.error;
+          else if (body?.message) message = body.message;
+        } catch { /* ignore parse errors */ }
+        if (xhr.status === 413) {
+          message = 'File too large — Supabase free tier allows up to 50 MB per file.';
+        }
+        resolve({ path: '', error: message });
       }
     };
 
