@@ -55,6 +55,23 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
         const storagePath = `${user.id}/${Date.now()}-${i}-${file.name}`;
         const targetFolderId = folderMap.get(i) ?? folderId;
 
+        // Hard-limit check — Supabase free tier caps uploads at 50 MB
+        const MAX_FILE_BYTES = 50 * 1024 * 1024;
+        if (file.size > MAX_FILE_BYTES) {
+          setUploads((prev) =>
+            prev.map((u) =>
+              u.file === file
+                ? { ...u, status: 'error' as const, error: 'Exceeds 50 MB limit' }
+                : u
+            )
+          );
+          toast.error(
+            `"${file.name}" is ${formatBytes(file.size)} — Supabase free tier limits files to 50 MB. Upgrade to Pro for larger uploads.`,
+            { duration: 7000 }
+          );
+          continue;
+        }
+
         setUploads((prev) =>
           prev.map((u) =>
             u.file === file ? { ...u, status: 'uploading' as const } : u
