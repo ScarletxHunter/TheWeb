@@ -140,48 +140,45 @@ export async function uploadFile(
 // Download
 // ---------------------------------------------------------------------------
 
-export async function downloadFile(storagePath: string): Promise<{ url: string; error: string | null }> {
+/**
+ * Get a signed URL for a stored file. Pass `downloadAs` to get a URL that
+ * Supabase serves with `Content-Disposition: attachment; filename=...` so
+ * the browser streams it as a download (no in-memory blob — works for
+ * arbitrarily large files on iOS and desktop).
+ */
+export async function downloadFile(
+  storagePath: string,
+  downloadAs?: string,
+): Promise<{ url: string; error: string | null }> {
   const { data, error } = await supabase.storage
     .from(BUCKET)
-    .createSignedUrl(storagePath, 3600);
+    .createSignedUrl(storagePath, 3600, downloadAs ? { download: downloadAs } : undefined);
 
   if (error) return { url: '', error: error.message };
   return { url: data.signedUrl, error: null };
 }
 
 /**
- * Fetch a remote URL as a blob and trigger a named download.
- * Using a blob object URL (same-origin) makes the `download` attribute work
- * on iOS Safari, which ignores it for cross-origin URLs (Supabase storage).
- */
-export async function fetchBlobAndDownload(url: string, filename: string): Promise<void> {
-  const response = await fetch(url);
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = objectUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
-}
-
-/**
- * One-shot helper: get a signed URL then blob-download it.
+ * Trigger a named download for a stored file.
+ * Uses Supabase's `download=<filename>` query param so the response is
+ * served with `Content-Disposition: attachment` — the browser streams it
+ * directly to disk instead of buffering the whole file in memory.
  */
 export async function blobDownload(
   storagePath: string,
   filename: string,
 ): Promise<{ error: string | null }> {
-  const { url, error } = await downloadFile(storagePath);
+  const { url, error } = await downloadFile(storagePath, filename);
   if (error || !url) return { error: error ?? 'Failed to get download URL' };
-  try {
-    await fetchBlobAndDownload(url, filename);
-    return { error: null };
-  } catch {
-    return { error: 'Download failed' };
-  }
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  return { error: null };
 }
 
 // ---------------------------------------------------------------------------
