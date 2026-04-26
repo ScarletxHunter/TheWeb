@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Shield, Eye, Users, HardDrive } from 'lucide-react';
+import { getEffectiveUserQuotaBytes } from '../../lib/config';
 import { getAllProfiles, updateProfileRole, updateProfileQuota } from '../../lib/database';
 import { useAuth } from '../../context/AuthContext';
 import { formatBytes, formatDate } from '../../lib/utils';
@@ -25,7 +26,7 @@ export function UserManager() {
   }, []);
 
   const editQuota = async (profile: Profile) => {
-    const currentGb = (profile.quota_bytes ?? GB) / GB;
+    const currentGb = getEffectiveUserQuotaBytes(profile.quota_bytes) / GB;
     const input = prompt(
       `Set storage quota for ${profile.display_name || profile.email} (in GB):`,
       String(currentGb)
@@ -93,11 +94,11 @@ export function UserManager() {
             <button
               onClick={() => editQuota(profile)}
               title="Edit storage quota"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors cursor-pointer"
-            >
-              <HardDrive className="w-3.5 h-3.5" />
-              {formatBytes(profile.quota_bytes ?? GB)}
-            </button>
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors cursor-pointer"
+          >
+            <HardDrive className="w-3.5 h-3.5" />
+            {formatBytes(getEffectiveUserQuotaBytes(profile.quota_bytes))}
+          </button>
             <button
               onClick={() => toggleRole(profile)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${

@@ -13,8 +13,8 @@ import { ShareLinkModal } from '../components/sharing/ShareLinkModal';
 import { FilePreviewModal } from '../components/files/FilePreviewModal';
 import { MoveToFolderModal } from '../components/files/MoveToFolderModal';
 import { FolderOpen, Trash2, X, Download, FolderInput, Upload, CloudOff } from 'lucide-react';
-import { trashFile, trashFiles, renameFile, deleteFileRecords } from '../lib/database';
-import { blobDownload, deleteFile } from '../lib/storage';
+import { trashFile, trashFiles, renameFile, deleteFileRecords, getGroupMembers } from '../lib/database';
+import { blobDownloadFile, deleteStoredFile } from '../lib/storage';
 import toast from 'react-hot-toast';
 import type { FileRecord } from '../types';
 import type { ViewMode, SortField, SortOrder } from '../components/layout/Header';
@@ -32,7 +32,7 @@ export function Dashboard() {
       return { type: 'group' as const, groupId };
     }
     return user ? { type: 'personal' as const, userId: user.id } : undefined;
-  }, [space, groupId, user?.id]);
+  }, [space, groupId, user]);
 
   const { files, loading: filesLoading, refresh: refreshFiles, searchFiles } = useFiles(folderId, spaceContext);
   const { folders, breadcrumbs, loading: foldersLoading, refresh: refreshFolders } = useFolders(folderId, spaceContext);
@@ -42,6 +42,7 @@ export function Dashboard() {
   const [previewFile, setPreviewFile] = useState<FileRecord | null>(null);
   const [moveFileIds, setMoveFileIds] = useState<string[] | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [canManageGroupFiles, setCanManageGroupFiles] = useState(false);
   const lastSelectedRef = useRef<string | null>(null);
 
   // View mode & sort
@@ -111,6 +112,30 @@ export function Dashboard() {
     refreshFolders();
   }, [refreshFiles, refreshFolders]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadGroupRole() {
+      if (!(space === 'group' && groupId && user?.id)) {
+        setCanManageGroupFiles(false);
+        return;
+      }
+
+      const members = await getGroupMembers(groupId);
+      if (cancelled) return;
+
+      setCanManageGroupFiles(
+        members.some((member) => member.user_id === user.id && member.role === 'admin')
+      );
+    }
+
+    loadGroupRole();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [space, groupId, user?.id]);
+
   // Selection
   const toggleSelect = useCallback((fileId: string, shiftKey: boolean) => {
     setSelectedIds(prev => {
@@ -179,15 +204,13 @@ export function Dashboard() {
     const deletedIds = new Set<string>();
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
-      const { error, affected } = await deleteFileRecords(batch);
+      const { error, affected, deletedIds: deletedBatchIds } = await deleteFileRecords(batch);
       if (error) {
         console.error('Delete batch failed:', error);
         failed += batch.length;
       } else {
         if (affected < batch.length) failed += batch.length - affected;
-        // We can't tell which rows succeeded individually; assume the
-        // first `affected` of the batch did. Good enough for cleanup.
-        for (let k = 0; k < affected; k++) deletedIds.add(batch[k]);
+        deletedBatchIds.forEach((id) => deletedIds.add(id));
       }
       toast.loading(`Deleting records ${Math.min(i + BATCH_SIZE, ids.length)}/${count}...`, { id: toastId });
     }
@@ -195,7 +218,7 @@ export function Dashboard() {
     // Now remove storage blobs for rows that were actually deleted.
     const toRemove = selected.filter(f => deletedIds.has(f.id));
     for (let i = 0; i < toRemove.length; i++) {
-      await deleteFile(toRemove[i].storage_path);
+      await deleteStoredFile(toRemove[i]);
       if ((i + 1) % 10 === 0) {
         toast.loading(`Removing storage ${i + 1}/${toRemove.length}...`, { id: toastId });
       }
@@ -212,7 +235,7 @@ export function Dashboard() {
     const selected = files.filter(f => selectedIds.has(f.id));
     let failed = 0;
     for (const file of selected) {
-      const { error } = await blobDownload(file.storage_path, file.name);
+      const { error } = await blobDownloadFile(file);
       if (error) failed++;
     }
     if (failed > 0) toast.error(`${failed} file(s) failed to download`);
@@ -222,14 +245,14 @@ export function Dashboard() {
   // Single file actions
   const handleTrashFile = async (file: FileRecord) => {
     const { error } = await trashFile(file.id);
-    if (error) toast.error('Failed to trash file');
+    if (error) toast.error(error);
     else { toast.success('File moved to trash'); refreshFiles(); }
   };
 
   const handleRenameFile = async (file: FileRecord, newName: string) => {
     if (!newName || newName === file.name) return;
     const { error } = await renameFile(file.id, newName);
-    if (error) toast.error('Failed to rename');
+    if (error) toast.error(error);
     else { toast.success('File renamed'); refreshFiles(); }
   };
 
@@ -382,13 +405,16 @@ export function Dashboard() {
               onRefresh={refreshFiles}
               onShareFile={setShareFile}
               onPreviewFile={setPreviewFile}
-              onTrashFile={handleTrashFile}
-              onRenameFile={handleRenameFile}
-              onMoveFile={(file) => setMoveFileIds([file.id])}
-              selectedIds={selectedIds}
-              onSelect={toggleSelect}
-              selectionMode={selectionMode}
-              viewMode={viewMode}
+            onTrashFile={handleTrashFile}
+            onRenameFile={handleRenameFile}
+            onMoveFile={(file) => setMoveFileIds([file.id])}
+            canManageFile={(file) =>
+              user?.id === file.uploaded_by || (Boolean(file.group_id) && canManageGroupFiles)
+            }
+            selectedIds={selectedIds}
+            onSelect={toggleSelect}
+            selectionMode={selectionMode}
+            viewMode={viewMode}
             />
           </div>
         )}

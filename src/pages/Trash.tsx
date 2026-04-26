@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Trash2, RotateCcw, AlertTriangle, Menu } from 'lucide-react';
 import { getTrashedFiles, restoreFile, deleteFileRecord } from '../lib/database';
-import { deleteFile } from '../lib/storage';
+import { deleteStoredFile } from '../lib/storage';
 import { formatBytes, formatDate } from '../lib/utils';
 import toast from 'react-hot-toast';
 import type { FileRecord } from '../types';
@@ -27,8 +27,19 @@ export function Trash() {
 
   const handlePermanentDelete = async (file: FileRecord) => {
     if (!confirm(`Permanently delete "${file.name}"? This cannot be undone.`)) return;
-    await deleteFile(file.storage_path);
-    await deleteFileRecord(file.id);
+    const { error: dbError } = await deleteFileRecord(file.id);
+    if (dbError) {
+      toast.error(dbError);
+      return;
+    }
+
+    const { error: storageError } = await deleteStoredFile(file);
+    if (storageError) {
+      toast.error(`File record deleted, but storage cleanup failed: ${storageError}`);
+      refresh();
+      return;
+    }
+
     toast.success('File permanently deleted');
     refresh();
   };
@@ -36,8 +47,16 @@ export function Trash() {
   const handleEmptyTrash = async () => {
     if (!confirm(`Permanently delete all ${files.length} files in trash? This cannot be undone.`)) return;
     for (const file of files) {
-      await deleteFile(file.storage_path);
-      await deleteFileRecord(file.id);
+      const { error: dbError } = await deleteFileRecord(file.id);
+      if (dbError) {
+        toast.error(`Failed to delete "${file.name}": ${dbError}`);
+        continue;
+      }
+
+      const { error: storageError } = await deleteStoredFile(file);
+      if (storageError) {
+        toast.error(`Deleted "${file.name}" from the database, but storage cleanup failed.`);
+      }
     }
     toast.success('Trash emptied');
     refresh();

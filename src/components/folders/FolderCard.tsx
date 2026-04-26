@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Folder as FolderIcon, MoreVertical, Pencil, Trash2, Download } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { renameFolder, deleteFolder, getFiles, getFolders } from '../../lib/database';
-import { downloadFile } from '../../lib/storage';
+import { fetchStoredFileBlob } from '../../lib/storage';
 import JSZip from 'jszip';
 import toast from 'react-hot-toast';
 import type { Folder } from '../../types';
@@ -64,11 +64,9 @@ export function FolderCard({ folder, onNavigate, onRefresh }: FolderCardProps) {
 
         // Download and add each file
         for (const file of files) {
-          const { url, error } = await downloadFile(file.storage_path);
-          if (error || !url) continue;
+          const { blob, error } = await fetchStoredFileBlob(file);
+          if (error || !blob) continue;
           try {
-            const resp = await fetch(url);
-            const blob = await resp.blob();
             zipFolder.file(file.name, blob);
           } catch {
             // skip files that fail to download

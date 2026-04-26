@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Download, Trash2, Share2, MoreVertical, Pencil, Eye, FolderInput } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { blobDownload } from '../../lib/storage';
+import { blobDownloadFile, isChunkedStoragePath } from '../../lib/storage';
 import { formatBytes, formatDate, getFileIcon, getFileColor } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import type { FileRecord } from '../../types';
@@ -13,6 +13,7 @@ interface FileListItemProps {
   onPreview?: () => void;
   onRename?: (newName: string) => void;
   onMove?: () => void;
+  canManage?: boolean;
   selected?: boolean;
   onSelect?: (shiftKey: boolean) => void;
   selectionMode?: boolean;
@@ -20,15 +21,17 @@ interface FileListItemProps {
 
 export function FileListItem({
   file, onDelete, onShare, onPreview, onRename, onMove,
+  canManage,
   selected, onSelect, selectionMode,
 }: FileListItemProps) {
   const { user } = useAuth();
-  const canManage = user?.id === file.uploaded_by;
+  const canManageFile = canManage ?? user?.id === file.uploaded_by;
   const [menuOpen, setMenuOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [editName, setEditName] = useState(file.name);
   const renameRef = useRef<HTMLInputElement>(null);
+  const isChunked = isChunkedStoragePath(file.storage_path);
 
   const Icon = getFileIcon(file.mime_type);
   const colorClass = getFileColor(file.mime_type);
@@ -43,7 +46,7 @@ export function FileListItem({
 
   const handleDownload = async () => {
     setDownloading(true);
-    const { error } = await blobDownload(file.storage_path, file.name);
+    const { error } = await blobDownloadFile(file);
     if (error) toast.error('Download failed');
     setDownloading(false);
   };
@@ -104,7 +107,14 @@ export function FileListItem({
             className="bg-gray-800 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white w-full max-w-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
         ) : (
-          <p className="text-sm text-white truncate">{file.name}</p>
+          <div>
+            <p className="text-sm text-white truncate">{file.name}</p>
+            {isChunked && (
+              <p className="text-[11px] text-indigo-300 truncate">
+                Large file. Download rebuilds it automatically.
+              </p>
+            )}
+          </div>
         )}
       </div>
 
@@ -155,7 +165,7 @@ export function FileListItem({
                 <button onClick={(e) => { e.stopPropagation(); onShare(); setMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 cursor-pointer">
                   <Share2 className="w-4 h-4" /> Share link
                 </button>
-                {canManage && (
+                {canManageFile && (
                   <>
                     <button onClick={(e) => { e.stopPropagation(); setEditName(file.name); setIsRenaming(true); setMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 cursor-pointer">
                       <Pencil className="w-4 h-4" /> Rename
