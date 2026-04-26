@@ -1,5 +1,6 @@
 import * as tus from 'tus-js-client';
 import { SUPABASE_RESUMABLE_UPLOAD_ENDPOINT, UPLOAD_PART_SIZE_BYTES } from './config';
+import { isStreamingDownloadSupported, streamingDownloadChunked } from './streamingDownload';
 import { supabase } from './supabase';
 import type { FileRecord } from '../types';
 
@@ -393,8 +394,31 @@ export async function blobDownload(
 }
 
 export async function blobDownloadFile(
-  file: StoredFileRef,
+  file: StoredFileRef & Partial<Pick<FileRecord, 'size'>>,
 ): Promise<{ error: string | null }> {
+  const descriptor = parseChunkedStoragePath(file.storage_path);
+
+  // Chunked file → stream parts directly to disk via the download SW.
+  // No in-memory blob, so 500 MB / multi-GB files work even on iOS Safari.
+  if (descriptor && isStreamingDownloadSupported()) {
+    const chunkPaths = Array.from({ length: descriptor.partCount }, (_, index) =>
+      buildChunkPartPath(descriptor.prefix, index),
+    );
+
+    const { error } = await streamingDownloadChunked({
+      chunkPaths,
+      filename: file.name,
+      mimeType: file.mime_type || 'application/octet-stream',
+      totalSize: typeof file.size === 'number' ? file.size : undefined,
+    });
+
+    if (!error) return { error: null };
+
+    // Fall through to in-memory reassembly only if streaming failed for a
+    // reason other than "browser doesn't support it" — best-effort recovery.
+    console.warn('[download] streaming failed, falling back to blob:', error);
+  }
+
   const { blob, error } = await fetchStoredFileBlob(file);
   if (error || !blob) return { error: error ?? 'Download failed' };
 
