@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Download, Share2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { blobDownloadFile, downloadFile, fetchBlobAndDownload, isChunkedStoragePath } from '../../lib/storage';
+import { blobDownloadFile, downloadFile, fetchBlobAndDownload, getChunkedFileLayout, isChunkedStoragePath } from '../../lib/storage';
+import { isStreamingDownloadSupported, registerPreviewStream } from '../../lib/streamingDownload';
 import { formatBytes } from '../../lib/utils';
 import type { FileRecord } from '../../types';
 
@@ -18,19 +19,53 @@ export function FilePreviewModal({ file, files, onClose, onShare, onNavigate }: 
   const isChunked = isChunkedStoragePath(file.storage_path);
 
   useEffect(() => {
+    let cancelled = false;
+    let cleanupPreview: (() => void) | null = null;
+
     async function load() {
       setLoading(true);
+      setUrl(null);
+
       if (isChunked) {
-        setUrl(null);
+        if (!isStreamingDownloadSupported()) {
+          setLoading(false);
+          return;
+        }
+        const layout = getChunkedFileLayout(file.storage_path);
+        if (!layout) {
+          setLoading(false);
+          return;
+        }
+        const { session } = await registerPreviewStream({
+          chunkPaths: layout.chunkPaths,
+          mimeType: file.mime_type || 'application/octet-stream',
+          totalSize: file.size,
+          partSize: layout.partSize,
+        });
+        if (cancelled) {
+          session?.unregister();
+          return;
+        }
+        if (session) {
+          setUrl(session.url);
+          cleanupPreview = session.unregister;
+        }
         setLoading(false);
         return;
       }
+
       const { url: signedUrl, error } = await downloadFile(file.storage_path);
+      if (cancelled) return;
       if (!error) setUrl(signedUrl);
       setLoading(false);
     }
     load();
-  }, [file.storage_path, isChunked]);
+
+    return () => {
+      cancelled = true;
+      if (cleanupPreview) cleanupPreview();
+    };
+  }, [file.storage_path, isChunked, file.mime_type, file.size]);
 
   const handleDownload = async () => {
     if (isChunked) {
@@ -93,11 +128,11 @@ export function FilePreviewModal({ file, files, onClose, onShare, onNavigate }: 
             <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
           )}
 
-          {!loading && isChunked && (
+          {!loading && !url && isChunked && (
             <div className="text-center max-w-md">
-              <p className="text-gray-300 mb-2">Inline preview is disabled for chunked files.</p>
+              <p className="text-gray-300 mb-2">Inline preview isn't supported in this browser.</p>
               <p className="text-sm text-gray-500 mb-4">
-                Download will automatically rebuild the original file first.
+                Download will rebuild the original file as it streams.
               </p>
               <button onClick={handleDownload} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium cursor-pointer transition-colors">
                 <Download className="w-5 h-5 inline mr-2" />Download File

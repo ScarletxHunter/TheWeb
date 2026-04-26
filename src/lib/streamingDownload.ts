@@ -3,7 +3,8 @@ import { supabase } from './supabase';
 const BUCKET = 'vault-files';
 const SW_URL = '/download-sw.js';
 const SW_SCOPE = '/';
-const STREAM_PATH_PREFIX = '/__stream-download/';
+const STREAM_DOWNLOAD_PREFIX = '/__stream-download/';
+const STREAM_PREVIEW_PREFIX = '/__stream-preview/';
 const SIGNED_URL_TTL_SECONDS = 3600;
 
 let registrationPromise: Promise<ServiceWorkerRegistration> | null = null;
@@ -73,15 +74,15 @@ function generateTaskId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function waitForSwAck(id: string): Promise<void> {
+function waitForSwAck(id: string, expectedType: 'registered' | 'preview-registered'): Promise<void> {
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       navigator.serviceWorker.removeEventListener('message', onMessage);
-      reject(new Error('Service worker did not acknowledge the download task.'));
+      reject(new Error('Service worker did not acknowledge the task.'));
     }, 5_000);
 
     const onMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'registered' && event.data?.id === id) {
+      if (event.data?.type === expectedType && event.data?.id === id) {
         window.clearTimeout(timeout);
         navigator.serviceWorker.removeEventListener('message', onMessage);
         resolve();
@@ -117,7 +118,7 @@ export async function streamingDownloadChunked(args: {
   if (signError) return { error: signError };
 
   const id = generateTaskId();
-  const ack = waitForSwAck(id);
+  const ack = waitForSwAck(id, 'registered');
 
   controller.postMessage({
     type: 'register-stream',
@@ -138,7 +139,7 @@ export async function streamingDownloadChunked(args: {
   // attachment response, so the browser saves to disk without leaving the page.
   const iframe = document.createElement('iframe');
   iframe.style.display = 'none';
-  iframe.src = `${STREAM_PATH_PREFIX}${id}`;
+  iframe.src = `${STREAM_DOWNLOAD_PREFIX}${id}`;
   document.body.appendChild(iframe);
 
   window.setTimeout(() => {
@@ -146,4 +147,71 @@ export async function streamingDownloadChunked(args: {
   }, 60_000);
 
   return { error: null };
+}
+
+export interface PreviewSession {
+  url: string;
+  unregister: () => void;
+}
+
+/**
+ * Register a chunked file with the SW for live preview. Returns a same-origin
+ * URL that can be fed straight to a `<video>`, `<audio>`, `<img>`, or
+ * `<iframe>` element. The SW handles HTTP Range requests so video/audio
+ * elements can seek the timeline.
+ *
+ * Call `session.unregister()` when the preview is no longer needed (e.g. on
+ * modal close) so the SW frees the task and the signed chunk URLs.
+ */
+export async function registerPreviewStream(args: {
+  chunkPaths: string[];
+  mimeType: string;
+  totalSize: number;
+  partSize: number;
+}): Promise<{ session: PreviewSession | null; error: string | null }> {
+  if (args.chunkPaths.length === 0) {
+    return { session: null, error: 'No chunks to preview.' };
+  }
+  if (!Number.isFinite(args.totalSize) || args.totalSize <= 0) {
+    return { session: null, error: 'Total size is required to register a preview.' };
+  }
+  if (!Number.isFinite(args.partSize) || args.partSize <= 0) {
+    return { session: null, error: 'Part size is required to register a preview.' };
+  }
+
+  let controller: ServiceWorker;
+  try {
+    controller = await ensureStreamingDownloadSW();
+  } catch (err) {
+    return { session: null, error: err instanceof Error ? err.message : 'Service worker unavailable.' };
+  }
+
+  const { urls, error: signError } = await getSignedUrlsForPaths(args.chunkPaths);
+  if (signError) return { session: null, error: signError };
+
+  const id = generateTaskId();
+  const ack = waitForSwAck(id, 'preview-registered');
+
+  controller.postMessage({
+    type: 'register-preview',
+    id,
+    urls,
+    mimeType: args.mimeType,
+    totalSize: args.totalSize,
+    partSize: args.partSize,
+  });
+
+  try {
+    await ack;
+  } catch (err) {
+    return { session: null, error: err instanceof Error ? err.message : 'Failed to register preview task.' };
+  }
+
+  return {
+    session: {
+      url: `${STREAM_PREVIEW_PREFIX}${id}`,
+      unregister: () => controller.postMessage({ type: 'unregister-preview', id }),
+    },
+    error: null,
+  };
 }
