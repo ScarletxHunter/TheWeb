@@ -58,6 +58,28 @@ export function isChunkedStoragePath(storagePath: string): boolean {
   return parseChunkedStoragePath(storagePath) !== null;
 }
 
+export interface ChunkedFileLayout {
+  chunkPaths: string[];
+  partSize: number;
+  partCount: number;
+}
+
+/**
+ * For a chunked storage path, return the ordered list of part paths plus the
+ * configured part size. Returns null for non-chunked paths.
+ */
+export function getChunkedFileLayout(storagePath: string): ChunkedFileLayout | null {
+  const descriptor = parseChunkedStoragePath(storagePath);
+  if (!descriptor) return null;
+  return {
+    chunkPaths: Array.from({ length: descriptor.partCount }, (_, index) =>
+      buildChunkPartPath(descriptor.prefix, index),
+    ),
+    partSize: descriptor.partSize,
+    partCount: descriptor.partCount,
+  };
+}
+
 function getChunkPaths(storagePath: string): string[] {
   const descriptor = parseChunkedStoragePath(storagePath);
   if (!descriptor) return [storagePath];
