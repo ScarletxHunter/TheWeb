@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { getEffectiveUserQuotaBytes } from '../../lib/config';
 import { getMyGroups, getMyStorageUsed } from '../../lib/database';
 import { formatBytes } from '../../lib/utils';
 import {
@@ -138,7 +139,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         {/* Storage quota */}
         <div className="border-t border-gray-800 px-4 py-3">
           {(() => {
-            const maxStorage = profile?.quota_bytes ?? 1024 * 1024 * 1024;
+            const maxStorage = getEffectiveUserQuotaBytes(profile?.quota_bytes);
             const pct = Math.min((storageUsed / maxStorage) * 100, 100);
             return (
               <div>

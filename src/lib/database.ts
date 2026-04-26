@@ -112,7 +112,11 @@ export async function deleteFileRecords(fileIds: string[]) {
     .delete()
     .in('id', fileIds)
     .select('id');
-  return { error: error?.message ?? null, affected: data?.length ?? 0 };
+  return {
+    error: error?.message ?? null,
+    affected: data?.length ?? 0,
+    deletedIds: (data ?? []).map((row) => row.id),
+  };
 }
 
 // Soft-delete a file (move to trash)

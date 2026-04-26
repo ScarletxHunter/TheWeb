@@ -11,6 +11,7 @@ interface FileGridProps {
   onTrashFile?: (file: FileRecord) => void;
   onRenameFile?: (file: FileRecord, newName: string) => void;
   onMoveFile?: (file: FileRecord) => void;
+  canManageFile?: (file: FileRecord) => boolean;
   selectedIds?: Set<string>;
   onSelect?: (fileId: string, shiftKey: boolean) => void;
   selectionMode?: boolean;
@@ -19,7 +20,7 @@ interface FileGridProps {
 
 export function FileGrid({
   files, onRefresh, onShareFile, onPreviewFile, onTrashFile,
-  onRenameFile, onMoveFile, selectedIds, onSelect, selectionMode,
+  onRenameFile, onMoveFile, canManageFile, selectedIds, onSelect, selectionMode,
   viewMode = 'grid',
 }: FileGridProps) {
   if (files.length === 0) return null;
@@ -46,6 +47,7 @@ export function FileGrid({
             onPreview={() => onPreviewFile?.(file)}
             onRename={(newName) => onRenameFile?.(file, newName)}
             onMove={() => onMoveFile?.(file)}
+            canManage={canManageFile?.(file)}
             selected={selectedIds?.has(file.id)}
             onSelect={(shiftKey) => onSelect?.(file.id, shiftKey)}
             selectionMode={selectionMode}
@@ -66,6 +68,7 @@ export function FileGrid({
           onPreview={() => onPreviewFile?.(file)}
           onRename={(newName) => onRenameFile?.(file, newName)}
           onMove={() => onMoveFile?.(file)}
+          canManage={canManageFile?.(file)}
           selected={selectedIds?.has(file.id)}
           onSelect={(shiftKey) => onSelect?.(file.id, shiftKey)}
           selectionMode={selectionMode}

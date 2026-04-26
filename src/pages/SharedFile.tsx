@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Download, Globe, AlertCircle, Clock, Lock } from 'lucide-react';
 import { getShareLinkByToken } from '../lib/database';
-import { blobDownload } from '../lib/storage';
+import { blobDownloadFile } from '../lib/storage';
 import { formatBytes, hashPassword } from '../lib/utils';
 import toast, { Toaster } from 'react-hot-toast';
 import type { ShareLink } from '../types';
@@ -52,7 +52,7 @@ export function SharedFile() {
   const handleDownload = async () => {
     if (!link?.files) return;
     setDownloading(true);
-    const { error } = await blobDownload(link.files.storage_path, link.files.name);
+    const { error } = await blobDownloadFile(link.files);
     if (error) toast.error('Download failed');
     setDownloading(false);
   };

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { HardDrive, FileIcon, Database, Users } from 'lucide-react';
+import { PROJECT_PLAN_NAME, PROJECT_STORAGE_LIMIT_BYTES } from '../../lib/config';
 import { getTotalStorageUsed, getTotalFileCount, getStoragePerUser } from '../../lib/database';
 import { formatBytes } from '../../lib/utils';
 
@@ -40,7 +41,7 @@ export function StorageStats() {
     );
   }
 
-  const maxStorage = 1024 * 1024 * 1024; // 1GB free tier
+  const maxStorage = PROJECT_STORAGE_LIMIT_BYTES;
   const usagePercent = Math.min((storageUsed / maxStorage) * 100, 100);
 
   const stats = [
@@ -48,7 +49,7 @@ export function StorageStats() {
       icon: HardDrive,
       label: 'Site Storage Used',
       value: formatBytes(storageUsed),
-      sub: `of ${formatBytes(maxStorage)} total`,
+      sub: `of ${formatBytes(maxStorage)} configured`,
     },
     {
       icon: FileIcon,
@@ -102,7 +103,7 @@ export function StorageStats() {
           />
         </div>
         <p className="text-xs text-gray-600 mt-2">
-          This 1 GB limit is shared across the entire site. When full, no one can upload.
+          This shared limit uses the app's configured {PROJECT_PLAN_NAME} plan values. If you raise storage on Supabase, update the matching app config so this dashboard stays accurate.
         </p>
       </div>
 

@@ -1,10 +1,18 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  type DragEvent,
+  type InputHTMLAttributes,
+} from 'react';
 import { Upload, X, FolderUp } from 'lucide-react';
-import { uploadFile, compressImage } from '../../lib/storage';
+import toast from 'react-hot-toast';
+import { MAX_UPLOAD_FILE_BYTES, getEffectiveUserQuotaBytes } from '../../lib/config';
 import { createFileRecord, createFolder, getMyStorageUsed } from '../../lib/database';
+import { uploadFile, compressImage, deleteStoredFile } from '../../lib/storage';
 import { useAuth } from '../../context/AuthContext';
 import { formatBytes } from '../../lib/utils';
-import toast from 'react-hot-toast';
 import type { UploadProgress } from '../../types';
 
 interface FileUploadProps {
@@ -13,6 +21,17 @@ interface FileUploadProps {
   groupId?: string | null;
 }
 
+type DirectoryInputAttributes = InputHTMLAttributes<HTMLInputElement> & {
+  webkitdirectory?: string;
+  directory?: string;
+};
+
+const folderInputAttributes: DirectoryInputAttributes = {
+  webkitdirectory: '',
+  directory: '',
+  multiple: true,
+};
+
 export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadProps) {
   const { user, profile } = useAuth();
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
@@ -20,7 +39,6 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
-  // Mobile + button → open the native file picker directly.
   useEffect(() => {
     const open = () => fileInputRef.current?.click();
     window.addEventListener('open-upload-picker', open);
@@ -31,76 +49,75 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
     async (files: File[], folderMap: Map<number, string>) => {
       if (!user) return;
 
-      // Quota check before uploading anything
-      const incoming = files.reduce((s, f) => s + f.size, 0);
+      const incoming = files.reduce((sum, file) => sum + file.size, 0);
       const used = await getMyStorageUsed(user.id);
-      const quota = profile?.quota_bytes ?? 1024 * 1024 * 1024;
+      const quota = getEffectiveUserQuotaBytes(profile?.quota_bytes);
       if (used + incoming > quota) {
         const over = formatBytes(used + incoming - quota);
+        const remaining = formatBytes(Math.max(quota - used, 0));
         toast.error(
-          `Quota exceeded by ${over}. Used ${formatBytes(used)} of ${formatBytes(quota)}. Ask an admin to raise your quota.`
+          `Quota exceeded by ${over}. You have ${remaining} free out of ${formatBytes(quota)}.${groupId ? ' Group uploads still count against your storage.' : ''}`
         );
         return;
       }
 
-      const newUploads: UploadProgress[] = files.map((f) => ({
-        file: f,
+      const newUploads: UploadProgress[] = files.map((file) => ({
+        file,
         progress: 0,
         status: 'pending' as const,
       }));
       setUploads((prev) => [...prev, ...newUploads]);
 
-      // Plan limit — update MAX_FILE_BYTES to 1 073 741 824 (1 GB) after upgrading to Supabase Pro
-      const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB (free tier)
-
       for (let i = 0; i < files.length; i++) {
         const rawFile = files[i];
         const targetFolderId = folderMap.get(i) ?? folderId;
 
-        // Hard-limit check before attempting upload
-        if (rawFile.size > MAX_FILE_BYTES) {
+        if (MAX_UPLOAD_FILE_BYTES && rawFile.size > MAX_UPLOAD_FILE_BYTES) {
           setUploads((prev) =>
-            prev.map((u) =>
-              u.file === rawFile
-                ? { ...u, status: 'error' as const, error: 'Exceeds plan limit' }
-                : u
+            prev.map((upload) =>
+              upload.file === rawFile
+                ? { ...upload, status: 'error' as const, error: 'Exceeds configured upload limit' }
+                : upload
             )
           );
           toast.error(
-            `"${rawFile.name}" is ${formatBytes(rawFile.size)} — your plan allows up to ${formatBytes(MAX_FILE_BYTES)} per file.`,
+            `"${rawFile.name}" is ${formatBytes(rawFile.size)} and exceeds the configured upload limit of ${formatBytes(MAX_UPLOAD_FILE_BYTES)}.`,
             { duration: 7000 }
           );
           continue;
         }
 
-        // Auto-compress images (canvas resize + quality reduction, lossless skip if result is larger)
         let file = rawFile;
-        if (rawFile.type.startsWith('image/') && rawFile.type !== 'image/gif' && rawFile.type !== 'image/svg+xml') {
+        if (
+          rawFile.type.startsWith('image/') &&
+          rawFile.type !== 'image/gif' &&
+          rawFile.type !== 'image/svg+xml'
+        ) {
           file = await compressImage(rawFile);
           if (file.size < rawFile.size) {
             const saved = formatBytes(rawFile.size - file.size);
-            toast(`📸 "${file.name}" compressed — saved ${saved}`, { duration: 3000 });
+            toast(`Image compressed for "${file.name}" - saved ${saved}`, { duration: 3000 });
           }
         }
 
         const storagePath = `${user.id}/${Date.now()}-${i}-${file.name}`;
 
         setUploads((prev) =>
-          prev.map((u) =>
-            u.file === rawFile ? { ...u, status: 'uploading' as const } : u
+          prev.map((upload) =>
+            upload.file === rawFile ? { ...upload, status: 'uploading' as const } : upload
           )
         );
 
-        const { error } = await uploadFile(file, storagePath, (progress) => {
+        const { path: uploadedPath, error } = await uploadFile(file, storagePath, (progress) => {
           setUploads((prev) =>
-            prev.map((u) => (u.file === rawFile ? { ...u, progress } : u))
+            prev.map((upload) => (upload.file === rawFile ? { ...upload, progress } : upload))
           );
         });
 
         if (error) {
           setUploads((prev) =>
-            prev.map((u) =>
-              u.file === rawFile ? { ...u, status: 'error' as const, error } : u
+            prev.map((upload) =>
+              upload.file === rawFile ? { ...upload, status: 'error' as const, error } : upload
             )
           );
           toast.error(`Failed to upload ${rawFile.name}: ${error}`);
@@ -109,7 +126,7 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
 
         const { error: dbError } = await createFileRecord({
           name: rawFile.name,
-          storage_path: storagePath,
+          storage_path: uploadedPath,
           size: file.size,
           mime_type: file.type || 'application/octet-stream',
           folder_id: targetFolderId,
@@ -119,15 +136,22 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
 
         if (dbError) {
           setUploads((prev) =>
-            prev.map((u) =>
-              u.file === rawFile ? { ...u, status: 'error' as const, error: dbError } : u
+            prev.map((upload) =>
+              upload.file === rawFile
+                ? { ...upload, status: 'error' as const, error: dbError }
+                : upload
             )
           );
+          if (uploadedPath) {
+            await deleteStoredFile({ storage_path: uploadedPath });
+          }
           toast.error(`Failed to save ${rawFile.name}`);
         } else {
           setUploads((prev) =>
-            prev.map((u) =>
-              u.file === rawFile ? { ...u, status: 'done' as const, progress: 100 } : u
+            prev.map((upload) =>
+              upload.file === rawFile
+                ? { ...upload, status: 'done' as const, progress: 100 }
+                : upload
             )
           );
         }
@@ -135,7 +159,7 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
 
       onUploadComplete();
       setTimeout(() => {
-        setUploads((prev) => prev.filter((u) => u.status !== 'done'));
+        setUploads((prev) => prev.filter((upload) => upload.status !== 'done'));
       }, 2000);
     },
     [user, profile, folderId, onUploadComplete, groupId]
@@ -144,9 +168,7 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
   const handleFiles = useCallback(
     async (fileList: FileList | File[]) => {
       const files = Array.from(fileList);
-      // All files go to current folder (no folder structure)
       const folderMap = new Map<number, string>();
-      // No entries = all files use folderId fallback
       await uploadFilesToStorage(files, folderMap);
     },
     [uploadFilesToStorage]
@@ -160,17 +182,16 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
 
       toast(`Creating folders and uploading ${files.length} files...`);
 
-      // Build folder structure from webkitRelativePath
-      const folderIdCache = new Map<string, string>(); // "RootFolder/sub" => db folder id
-      const indexToFolderMap = new Map<number, string>(); // file index => target folder id
+      const folderIdCache = new Map<string, string>();
+      const indexToFolderMap = new Map<number, string>();
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const relativePath = (file as any).webkitRelativePath as string;
+        const relativePath = file.webkitRelativePath;
         if (!relativePath) continue;
 
         const parts = relativePath.split('/');
-        const folderParts = parts.slice(0, -1); // everything except filename
+        const folderParts = parts.slice(0, -1);
 
         let parentId = folderId;
         for (let depth = 0; depth < folderParts.length; depth++) {
@@ -203,11 +224,10 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
   );
 
   const handleDrop = useCallback(
-    async (e: React.DragEvent) => {
+    async (e: DragEvent) => {
       e.preventDefault();
       setDragOver(false);
 
-      // Check if any items are directories
       const items = e.dataTransfer.items;
       if (items?.length) {
         const entries: FileSystemEntry[] = [];
@@ -216,14 +236,17 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
           if (entry) entries.push(entry);
         }
 
-        const hasDirectory = entries.some((e) => e.isDirectory);
+        const hasDirectory = entries.some((entry) => entry.isDirectory);
         if (hasDirectory) {
-          // Recursively read directory entries
           const allFiles: File[] = [];
           const folderIdCache = new Map<string, string>();
           const fileToFolderMap = new Map<string, string>();
 
-          const readEntry = async (entry: FileSystemEntry, parentPath: string, parentFolderId: string | null): Promise<void> => {
+          const readEntry = async (
+            entry: FileSystemEntry,
+            parentPath: string,
+            parentFolderId: string | null
+          ): Promise<void> => {
             if (entry.isFile) {
               const file = await new Promise<File>((resolve) =>
                 (entry as FileSystemFileEntry).file(resolve)
@@ -232,43 +255,46 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
               Object.defineProperty(file, 'webkitRelativePath', { value: relativePath });
               fileToFolderMap.set(relativePath, parentFolderId!);
               allFiles.push(file);
-            } else if (entry.isDirectory) {
-              const dirReader = (entry as FileSystemDirectoryEntry).createReader();
-              const currentPath = parentPath + entry.name + '/';
+              return;
+            }
 
-              // Create folder in DB
-              let currentFolderId = parentFolderId;
-              const pathKey = currentPath.slice(0, -1); // remove trailing /
-              if (!folderIdCache.has(pathKey) && user) {
-                const { data } = await createFolder(
-                  entry.name,
-                  parentFolderId,
-                  user.id,
-                  groupId ?? null
-                );
-                if (data) {
-                  folderIdCache.set(pathKey, data.id);
-                  currentFolderId = data.id;
-                }
-              } else {
-                currentFolderId = folderIdCache.get(pathKey) ?? parentFolderId;
+            const dirReader = (entry as FileSystemDirectoryEntry).createReader();
+            const currentPath = parentPath + entry.name + '/';
+
+            let currentFolderId = parentFolderId;
+            const pathKey = currentPath.slice(0, -1);
+            if (!folderIdCache.has(pathKey) && user) {
+              const { data } = await createFolder(
+                entry.name,
+                parentFolderId,
+                user.id,
+                groupId ?? null
+              );
+              if (data) {
+                folderIdCache.set(pathKey, data.id);
+                currentFolderId = data.id;
               }
+            } else {
+              currentFolderId = folderIdCache.get(pathKey) ?? parentFolderId;
+            }
 
-              const entries = await new Promise<FileSystemEntry[]>((resolve) => {
-                const results: FileSystemEntry[] = [];
-                const readBatch = () => {
-                  dirReader.readEntries((batch) => {
-                    if (batch.length === 0) { resolve(results); return; }
-                    results.push(...batch);
-                    readBatch();
-                  });
-                };
-                readBatch();
-              });
+            const childEntries = await new Promise<FileSystemEntry[]>((resolve) => {
+              const results: FileSystemEntry[] = [];
+              const readBatch = () => {
+                dirReader.readEntries((batch) => {
+                  if (batch.length === 0) {
+                    resolve(results);
+                    return;
+                  }
+                  results.push(...batch);
+                  readBatch();
+                });
+              };
+              readBatch();
+            });
 
-              for (const child of entries) {
-                await readEntry(child, currentPath, currentFolderId);
-              }
+            for (const child of childEntries) {
+              await readEntry(child, currentPath, currentFolderId);
             }
           };
 
@@ -278,12 +304,11 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
           }
 
           if (allFiles.length > 0) {
-            // Build index-based map from relativePath-based map
             const indexMap = new Map<number, string>();
-            allFiles.forEach((file, idx) => {
-              const rel = (file as any).webkitRelativePath as string;
-              if (rel && fileToFolderMap.has(rel)) {
-                indexMap.set(idx, fileToFolderMap.get(rel)!);
+            allFiles.forEach((file, index) => {
+              const relativePath = file.webkitRelativePath;
+              if (relativePath && fileToFolderMap.has(relativePath)) {
+                indexMap.set(index, fileToFolderMap.get(relativePath)!);
               }
             });
             await uploadFilesToStorage(allFiles, indexMap);
@@ -296,16 +321,15 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
         handleFiles(e.dataTransfer.files);
       }
     },
-    [handleFiles, user, folderId, groupId]
+    [handleFiles, user, folderId, groupId, uploadFilesToStorage]
   );
 
   const clearUpload = (file: File) => {
-    setUploads((prev) => prev.filter((u) => u.file !== file));
+    setUploads((prev) => prev.filter((upload) => upload.file !== file));
   };
 
   return (
     <div>
-      {/* Drop zone */}
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -322,9 +346,14 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
       >
         <Upload className="w-10 h-10 text-gray-500 mx-auto mb-3" />
         <p className="text-sm text-gray-400">
-          <span className="text-indigo-400 font-medium">Click to upload files</span> or drag and drop files/folders
+          <span className="text-indigo-400 font-medium">Click to upload files</span> or drag and
+          drop files/folders
         </p>
-        <p className="text-xs text-gray-600 mt-1">Any file type</p>
+        <p className="text-xs text-gray-600 mt-1">
+          {MAX_UPLOAD_FILE_BYTES
+            ? `Any file type up to ${formatBytes(MAX_UPLOAD_FILE_BYTES)}`
+            : 'Any file type. Large uploads are split into smaller parts automatically and rebuilt during download.'}
+        </p>
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -349,12 +378,11 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
         }}
       />
 
-      {/* Folder input with webkitdirectory */}
       <input
         ref={folderInputRef}
         type="file"
         className="hidden"
-        {...({ webkitdirectory: '', directory: '', multiple: true } as any)}
+        {...folderInputAttributes}
         onChange={(e) => {
           if (e.target.files?.length) {
             handleFolderUpload(e.target.files);
@@ -363,37 +391,36 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
         }}
       />
 
-      {/* Upload progress */}
       {uploads.length > 0 && (
         <div className="mt-4 space-y-2">
-          {uploads.map((u, i) => (
+          {uploads.map((upload, index) => (
             <div
-              key={i}
+              key={index}
               className="bg-gray-800 rounded-lg p-3 flex items-center gap-3"
             >
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-white truncate">{u.file.name}</p>
-                <p className="text-xs text-gray-500">{formatBytes(u.file.size)}</p>
-                {u.status === 'uploading' && (
+                <p className="text-sm text-white truncate">{upload.file.name}</p>
+                <p className="text-xs text-gray-500">{formatBytes(upload.file.size)}</p>
+                {upload.status === 'uploading' && (
                   <div className="mt-1.5 h-1.5 bg-gray-700 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                      style={{ width: `${u.progress}%` }}
+                      style={{ width: `${upload.progress}%` }}
                     />
                   </div>
                 )}
               </div>
               <div className="flex-shrink-0">
-                {u.status === 'done' && (
+                {upload.status === 'done' && (
                   <span className="text-xs text-green-400">Done</span>
                 )}
-                {u.status === 'error' && (
-                  <button onClick={() => clearUpload(u.file)} className="cursor-pointer">
+                {upload.status === 'error' && (
+                  <button onClick={() => clearUpload(upload.file)} className="cursor-pointer">
                     <X className="w-4 h-4 text-red-400" />
                   </button>
                 )}
-                {u.status === 'uploading' && (
-                  <span className="text-xs text-gray-400">{u.progress}%</span>
+                {upload.status === 'uploading' && (
+                  <span className="text-xs text-gray-400">{upload.progress}%</span>
                 )}
               </div>
             </div>

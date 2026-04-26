@@ -25,3 +25,9 @@ dist-ssr
 .env
 
 .vercel
+
+# Unrelated local projects living in this repo
+local-backend/
+
+# Claude Code worktrees
+.claude/worktrees/

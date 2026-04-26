@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Download, Trash2, Share2, MoreVertical, Pencil, Eye, FolderInput } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { downloadFile, blobDownload } from '../../lib/storage';
+import { downloadFile, blobDownloadFile, isChunkedStoragePath } from '../../lib/storage';
 import { formatBytes, formatDate, getFileIcon, getFileColor } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import type { FileRecord } from '../../types';
@@ -13,6 +13,7 @@ interface FileCardProps {
   onPreview?: () => void;
   onRename?: (newName: string) => void;
   onMove?: () => void;
+  canManage?: boolean;
   selected?: boolean;
   onSelect?: (shiftKey: boolean) => void;
   selectionMode?: boolean;
@@ -20,10 +21,11 @@ interface FileCardProps {
 
 export function FileCard({
   file, onDelete, onShare, onPreview, onRename, onMove,
+  canManage,
   selected, onSelect, selectionMode,
 }: FileCardProps) {
   const { user } = useAuth();
-  const canManage = user?.id === file.uploaded_by;
+  const canManageFile = canManage ?? user?.id === file.uploaded_by;
   const [menuOpen, setMenuOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
@@ -32,14 +34,15 @@ export function FileCard({
   const renameRef = useRef<HTMLInputElement>(null);
 
   const isImage = file.mime_type.startsWith('image/');
+  const isChunked = isChunkedStoragePath(file.storage_path);
 
   useEffect(() => {
-    if (isImage) {
+    if (isImage && !isChunked) {
       downloadFile(file.storage_path).then(({ url }) => {
         if (url) setThumbUrl(url);
       });
     }
-  }, [file.storage_path, isImage]);
+  }, [file.storage_path, isImage, isChunked]);
 
   useEffect(() => {
     if (isRenaming && renameRef.current) {
@@ -54,7 +57,7 @@ export function FileCard({
 
   const handleDownload = async () => {
     setDownloading(true);
-    const { error } = await blobDownload(file.storage_path, file.name);
+    const { error } = await blobDownloadFile(file);
     if (error) toast.error('Download failed');
     setDownloading(false);
   };
@@ -117,7 +120,7 @@ export function FileCard({
               <button onClick={(e) => { e.stopPropagation(); onShare(); setMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2.5 text-sm text-gray-300 hover:bg-gray-700 cursor-pointer">
                 <Share2 className="w-4 h-4" /> Share link
               </button>
-              {canManage && (
+              {canManageFile && (
                 <>
                   <button onClick={(e) => { e.stopPropagation(); setEditName(file.name); setIsRenaming(true); setMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2.5 text-sm text-gray-300 hover:bg-gray-700 cursor-pointer">
                     <Pencil className="w-4 h-4" /> Rename
@@ -175,6 +178,12 @@ export function FileCard({
         <span className="text-xs text-gray-700">&middot;</span>
         <span className="text-xs text-gray-500">{formatDate(file.created_at)}</span>
       </div>
+
+      {isChunked && (
+        <p className="text-[11px] text-indigo-300 mt-2">
+          Large file. Download rebuilds it automatically.
+        </p>
+      )}
 
       {/* Quick download */}
       <button

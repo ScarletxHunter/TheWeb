@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Download, Share2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { downloadFile, fetchBlobAndDownload } from '../../lib/storage';
+import { blobDownloadFile, downloadFile, fetchBlobAndDownload, isChunkedStoragePath } from '../../lib/storage';
 import { formatBytes } from '../../lib/utils';
 import type { FileRecord } from '../../types';
 
@@ -15,18 +15,28 @@ interface FilePreviewModalProps {
 export function FilePreviewModal({ file, files, onClose, onShare, onNavigate }: FilePreviewModalProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const isChunked = isChunkedStoragePath(file.storage_path);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
+      if (isChunked) {
+        setUrl(null);
+        setLoading(false);
+        return;
+      }
       const { url: signedUrl, error } = await downloadFile(file.storage_path);
       if (!error) setUrl(signedUrl);
       setLoading(false);
     }
     load();
-  }, [file.storage_path]);
+  }, [file.storage_path, isChunked]);
 
   const handleDownload = async () => {
+    if (isChunked) {
+      await blobDownloadFile(file);
+      return;
+    }
     if (!url) return;
     try {
       await fetchBlobAndDownload(url, file.name);
@@ -81,6 +91,18 @@ export function FilePreviewModal({ file, files, onClose, onShare, onNavigate }: 
         <div className="flex-1 overflow-auto p-4 flex items-center justify-center min-h-[200px] relative">
           {loading && (
             <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          )}
+
+          {!loading && isChunked && (
+            <div className="text-center max-w-md">
+              <p className="text-gray-300 mb-2">Inline preview is disabled for chunked files.</p>
+              <p className="text-sm text-gray-500 mb-4">
+                Download will automatically rebuild the original file first.
+              </p>
+              <button onClick={handleDownload} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium cursor-pointer transition-colors">
+                <Download className="w-5 h-5 inline mr-2" />Download File
+              </button>
+            </div>
           )}
 
           {!loading && url && isImage && (
