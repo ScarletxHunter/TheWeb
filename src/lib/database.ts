@@ -194,13 +194,27 @@ export async function getAllFolders(): Promise<Folder[]> {
   return data ?? [];
 }
 
+// Supabase caps a single SELECT at 1000 rows (PostgREST `max-rows`), so the
+// storage-aggregation queries below paginate. Ordering by `created_at` ASC
+// keeps page boundaries stable when new uploads land mid-iteration.
+const STORAGE_PAGE_SIZE = 1000;
+
 export async function getTotalStorageUsed(): Promise<number> {
-  const { data } = await supabase
-    .from('files')
-    .select('size')
-    .is('deleted_at', null);
-  if (!data) return 0;
-  return data.reduce((sum, f) => sum + (f.size || 0), 0);
+  let total = 0;
+  let from = 0;
+  while (true) {
+    const { data } = await supabase
+      .from('files')
+      .select('size')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+      .range(from, from + STORAGE_PAGE_SIZE - 1);
+    if (!data || data.length === 0) break;
+    for (const f of data) total += f.size || 0;
+    if (data.length < STORAGE_PAGE_SIZE) break;
+    from += STORAGE_PAGE_SIZE;
+  }
+  return total;
 }
 
 // Project-wide usage (admin only — function enforces the role check).
@@ -224,13 +238,22 @@ export async function getProjectUsage(): Promise<ProjectUsage | null> {
 
 // Storage used by a specific user's own uploads (counts against their quota).
 export async function getMyStorageUsed(userId: string): Promise<number> {
-  const { data } = await supabase
-    .from('files')
-    .select('size')
-    .eq('uploaded_by', userId)
-    .is('deleted_at', null);
-  if (!data) return 0;
-  return data.reduce((sum, f) => sum + (f.size || 0), 0);
+  let total = 0;
+  let from = 0;
+  while (true) {
+    const { data } = await supabase
+      .from('files')
+      .select('size')
+      .eq('uploaded_by', userId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+      .range(from, from + STORAGE_PAGE_SIZE - 1);
+    if (!data || data.length === 0) break;
+    for (const f of data) total += f.size || 0;
+    if (data.length < STORAGE_PAGE_SIZE) break;
+    from += STORAGE_PAGE_SIZE;
+  }
+  return total;
 }
 
 export async function getTotalFileCount(): Promise<number> {
@@ -242,28 +265,34 @@ export async function getTotalFileCount(): Promise<number> {
 }
 
 export async function getStoragePerUser(): Promise<{ user_id: string; display_name: string | null; email: string; total_size: number; file_count: number }[]> {
-  const { data: files } = await supabase
-    .from('files')
-    .select('uploaded_by, size, profiles(display_name, email)')
-    .is('deleted_at', null);
-  if (!files) return [];
-
   const map = new Map<string, { display_name: string | null; email: string; total_size: number; file_count: number }>();
-  for (const f of files as any[]) {
-    const uid = f.uploaded_by;
-    if (!uid) continue;
-    const existing = map.get(uid);
-    if (existing) {
-      existing.total_size += f.size || 0;
-      existing.file_count += 1;
-    } else {
-      map.set(uid, {
-        display_name: f.profiles?.display_name || null,
-        email: f.profiles?.email || uid,
-        total_size: f.size || 0,
-        file_count: 1,
-      });
+  let from = 0;
+  while (true) {
+    const { data: files } = await supabase
+      .from('files')
+      .select('uploaded_by, size, profiles(display_name, email)')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+      .range(from, from + STORAGE_PAGE_SIZE - 1);
+    if (!files || files.length === 0) break;
+    for (const f of files as any[]) {
+      const uid = f.uploaded_by;
+      if (!uid) continue;
+      const existing = map.get(uid);
+      if (existing) {
+        existing.total_size += f.size || 0;
+        existing.file_count += 1;
+      } else {
+        map.set(uid, {
+          display_name: f.profiles?.display_name || null,
+          email: f.profiles?.email || uid,
+          total_size: f.size || 0,
+          file_count: 1,
+        });
+      }
     }
+    if (files.length < STORAGE_PAGE_SIZE) break;
+    from += STORAGE_PAGE_SIZE;
   }
   return Array.from(map.entries())
     .map(([user_id, data]) => ({ user_id, ...data }))
