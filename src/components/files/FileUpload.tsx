@@ -53,12 +53,16 @@ export function FileUpload({ folderId, onUploadComplete, groupId }: FileUploadPr
       const used = await getMyStorageUsed(user.id);
       const quota = getEffectiveUserQuotaBytes(profile?.quota_bytes);
       if (used + incoming > quota) {
+        if (profile?.role !== 'admin') {
+          const over = formatBytes(used + incoming - quota);
+          const remaining = formatBytes(Math.max(quota - used, 0));
+          toast.error(
+            `Quota exceeded by ${over}. You have ${remaining} free out of ${formatBytes(quota)}.${groupId ? ' Group uploads still count against your storage.' : ''}`
+          );
+          return;
+        }
         const over = formatBytes(used + incoming - quota);
-        const remaining = formatBytes(Math.max(quota - used, 0));
-        toast.error(
-          `Quota exceeded by ${over}. You have ${remaining} free out of ${formatBytes(quota)}.${groupId ? ' Group uploads still count against your storage.' : ''}`
-        );
-        return;
+        toast(`Admin override: uploading ${over} past your quota.`, { duration: 4000 });
       }
 
       const newUploads: UploadProgress[] = files.map((file) => ({
