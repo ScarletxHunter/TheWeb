@@ -57,7 +57,7 @@ const supabaseUrl = readEnv('VITE_SUPABASE_URL');
 const directStorageOrigin = getDirectStorageOrigin(supabaseUrl);
 
 export const DEFAULT_USER_QUOTA_BYTES =
-  parseByteSize(readEnv('VITE_DEFAULT_USER_QUOTA_BYTES')) ?? 5 * GB;
+  parseByteSize(readEnv('VITE_DEFAULT_USER_QUOTA_BYTES')) ?? 50 * GB;
 
 export function getEffectiveUserQuotaBytes(quotaBytes?: number | null): number {
   return Math.max(quotaBytes ?? 0, DEFAULT_USER_QUOTA_BYTES);
