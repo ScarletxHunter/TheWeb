@@ -858,9 +858,11 @@ export function QuickSend() {
                 </div>
 
                 <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 space-y-1 text-xs font-mono text-gray-300 leading-relaxed">
-                  <p className="text-gray-500"># Then run it</p>
-                  <p>pwsh ./theweb-send.ps1 ./my-photo.jpg</p>
-                  <p>bash ./theweb-send.sh ./my-photo.jpg</p>
+                  <p className="text-gray-500"># A single file</p>
+                  <p>pwsh ./theweb-send.ps1 ./photo.jpg</p>
+                  <p className="text-gray-500 pt-2"># Or a whole folder — auto-zipped, one URL back</p>
+                  <p>pwsh ./theweb-send.ps1 G:\ScarletxStudios\Picsw</p>
+                  <p>bash ./theweb-send.sh ./my-folder</p>
                   <p className="text-gray-500 pt-2"># Output</p>
                   <p>{appUrl}/shared/abcdef…</p>
                 </div>
@@ -936,15 +938,24 @@ function buildPowerShellScript(cfg: ScriptConfig) {
   return `#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-  Upload a file to TheWeb and print the share URL.
+  Upload a file or folder to TheWeb and print one share URL.
 .DESCRIPTION
   Hand this script to Claude Code, Cursor, Codex, or any CLI agent.
-  It uploads <Path> to your vault and prints a share URL on stdout.
+
+  - If <Path> is a FILE: uploaded as-is, one share URL is printed.
+  - If <Path> is a DIRECTORY: the entire folder is zipped client-side
+    into <foldername>.zip and uploaded as a single archive. ONE share
+    URL is printed for the whole folder. Do NOT loop over the files
+    yourself — pass the directory path directly.
+
   When the embedded token expires (~1 hour), regenerate at:
     ${cfg.appUrl}/quick
 .EXAMPLE
   .\\theweb-send.ps1 .\\photo.jpg
   ${cfg.appUrl}/shared/abcdef...
+.EXAMPLE
+  .\\theweb-send.ps1 G:\\ScarletxStudios\\Picsw
+  ${cfg.appUrl}/shared/xyz...    # one URL for the whole folder
 .EXAMPLE
   .\\theweb-send.ps1 .\\big.zip -NoShare
   Uploaded big.zip
@@ -963,83 +974,129 @@ $ANON_KEY     = "${cfg.anonKey}"
 $USER_ID      = "${cfg.userId}"
 $TOKEN        = "${cfg.token}"
 
-if (-not (Test-Path $Path)) { Write-Error "File not found: $Path"; exit 1 }
-$item = Get-Item $Path
-$name = $item.Name
-$size = $item.Length
-$ms   = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-$key  = "$USER_ID/$ms-$name"
+if (-not (Test-Path -LiteralPath $Path)) { Write-Error "Path not found: $Path"; exit 1 }
+$inputItem = Get-Item -LiteralPath $Path
+
+# If a directory was passed in, zip it once and upload the archive.
+$tempZipPath = $null
+if ($inputItem.PSIsContainer) {
+  $zipDisplayName = "$($inputItem.Name).zip"
+  $tempZipPath = Join-Path $env:TEMP "theweb-send-$([guid]::NewGuid().Guid).zip"
+  Write-Host "Zipping folder '$($inputItem.FullName)' -> $zipDisplayName ..."
+  try {
+    $children = Get-ChildItem -LiteralPath $inputItem.FullName -Force
+    if ($null -eq $children -or $children.Count -eq 0) {
+      Write-Error "Folder is empty: $($inputItem.FullName)"
+      exit 1
+    }
+    Compress-Archive -LiteralPath ($children | ForEach-Object { $_.FullName }) \`
+      -DestinationPath $tempZipPath -CompressionLevel Fastest -Force
+  } catch {
+    if ($tempZipPath -and (Test-Path -LiteralPath $tempZipPath)) {
+      Remove-Item -LiteralPath $tempZipPath -Force -ErrorAction SilentlyContinue
+    }
+    Write-Error "Could not zip folder: $_"
+    exit 1
+  }
+  $uploadFile = Get-Item -LiteralPath $tempZipPath
+  $name = $zipDisplayName
+  $size = $uploadFile.Length
+  $mime = "application/zip"
+} else {
+  $uploadFile = $inputItem
+  $name = $inputItem.Name
+  $size = $inputItem.Length
+  $mime = "application/octet-stream"
+}
+
+$ms  = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$key = "$USER_ID/$ms-$name"
 
 try {
-  Invoke-RestMethod -Method Post -InFile $item.FullName \`
-    -Uri "$SUPABASE_URL/storage/v1/object/vault-files/$key" \`
-    -Headers @{ Authorization = "Bearer $TOKEN" } \`
-    -ContentType "application/octet-stream" | Out-Null
-} catch {
-  Write-Error "Upload failed (token may have expired — regenerate at $APP_URL/quick): $_"
-  exit 1
+  try {
+    Invoke-RestMethod -Method Post -InFile $uploadFile.FullName \`
+      -Uri "$SUPABASE_URL/storage/v1/object/vault-files/$key" \`
+      -Headers @{ Authorization = "Bearer $TOKEN" } \`
+      -ContentType $mime | Out-Null
+  } catch {
+    Write-Error "Upload failed (token may have expired — regenerate at $APP_URL/quick): $_"
+    exit 1
+  }
+
+  $record = Invoke-RestMethod -Method Post \`
+    -Uri "$SUPABASE_URL/rest/v1/files" \`
+    -Headers @{
+      Authorization = "Bearer $TOKEN"
+      apikey        = $ANON_KEY
+      Prefer        = "return=representation"
+    } \`
+    -ContentType "application/json" \`
+    -Body (@{
+      name         = $name
+      storage_path = $key
+      size         = $size
+      mime_type    = $mime
+      folder_id    = $null
+      uploaded_by  = $USER_ID
+      group_id     = $null
+    } | ConvertTo-Json)
+
+  if ($NoShare) { Write-Output "Uploaded $name ($size bytes)."; exit 0 }
+
+  $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.ToCharArray()
+  $shareTok = -join ((1..32) | ForEach-Object { Get-Random -InputObject $chars })
+  $expiresAt = $null
+  if ($ExpiresHours -gt 0) {
+    $expiresAt = (Get-Date).ToUniversalTime().AddHours($ExpiresHours).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+  }
+
+  Invoke-RestMethod -Method Post \`
+    -Uri "$SUPABASE_URL/rest/v1/share_links" \`
+    -Headers @{
+      Authorization = "Bearer $TOKEN"
+      apikey        = $ANON_KEY
+      Prefer        = "return=representation"
+    } \`
+    -ContentType "application/json" \`
+    -Body (@{
+      file_id       = $record[0].id
+      token         = $shareTok
+      expires_at    = $expiresAt
+      created_by    = $USER_ID
+      password_hash = $null
+    } | ConvertTo-Json) | Out-Null
+
+  Write-Output "$APP_URL/shared/$shareTok"
 }
-
-$record = Invoke-RestMethod -Method Post \`
-  -Uri "$SUPABASE_URL/rest/v1/files" \`
-  -Headers @{
-    Authorization = "Bearer $TOKEN"
-    apikey        = $ANON_KEY
-    Prefer        = "return=representation"
-  } \`
-  -ContentType "application/json" \`
-  -Body (@{
-    name         = $name
-    storage_path = $key
-    size         = $size
-    mime_type    = "application/octet-stream"
-    folder_id    = $null
-    uploaded_by  = $USER_ID
-    group_id     = $null
-  } | ConvertTo-Json)
-
-if ($NoShare) { Write-Output "Uploaded $name ($size bytes)."; exit 0 }
-
-$chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.ToCharArray()
-$shareTok = -join ((1..32) | ForEach-Object { Get-Random -InputObject $chars })
-$expiresAt = $null
-if ($ExpiresHours -gt 0) {
-  $expiresAt = (Get-Date).ToUniversalTime().AddHours($ExpiresHours).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+finally {
+  if ($tempZipPath -and (Test-Path -LiteralPath $tempZipPath)) {
+    Remove-Item -LiteralPath $tempZipPath -Force -ErrorAction SilentlyContinue
+  }
 }
-
-Invoke-RestMethod -Method Post \`
-  -Uri "$SUPABASE_URL/rest/v1/share_links" \`
-  -Headers @{
-    Authorization = "Bearer $TOKEN"
-    apikey        = $ANON_KEY
-    Prefer        = "return=representation"
-  } \`
-  -ContentType "application/json" \`
-  -Body (@{
-    file_id       = $record[0].id
-    token         = $shareTok
-    expires_at    = $expiresAt
-    created_by    = $USER_ID
-    password_hash = $null
-  } | ConvertTo-Json) | Out-Null
-
-Write-Output "$APP_URL/shared/$shareTok"
 `;
 }
 
 function buildBashScript(cfg: ScriptConfig) {
   return `#!/usr/bin/env bash
-# theweb-send.sh — upload a file to TheWeb and print the share URL.
+# theweb-send.sh — upload a file or folder to TheWeb and print one share URL.
 #
-# Hand this to Claude Code, Cursor, Codex, or any CLI agent. It uploads
-# the file at <path> and prints the share URL on stdout. When the
-# embedded token expires (~1 hour), regenerate at:
+# Hand this to Claude Code, Cursor, Codex, or any CLI agent.
+#
+#   - If <path> is a FILE: uploaded as-is, one share URL is printed.
+#   - If <path> is a DIRECTORY: the entire folder is zipped client-side
+#     into <foldername>.zip and uploaded as a single archive. ONE share
+#     URL is printed for the whole folder. Do NOT loop over the files
+#     yourself — pass the directory path directly.
+#
+# When the embedded token expires (~1 hour), regenerate at:
 #   ${cfg.appUrl}/quick
 #
 # Usage:
-#   ./theweb-send.sh <path>              # upload + 7-day share link
+#   ./theweb-send.sh <path>              # file or folder, one share link
 #   ./theweb-send.sh <path> --no-share   # upload only
 #   ./theweb-send.sh <path> --hours 24   # custom expiry
+#
+# Requires: bash, curl, and \`zip\` (for folder uploads).
 set -euo pipefail
 
 SUPABASE_URL="${cfg.supabaseUrl}"
@@ -1050,35 +1107,58 @@ TOKEN="${cfg.token}"
 
 NO_SHARE=0
 EXPIRES_HOURS=168
-FILE=""
+INPUT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-share) NO_SHARE=1; shift ;;
     --hours)    EXPIRES_HOURS="$2"; shift 2 ;;
-    *)          FILE="$1"; shift ;;
+    *)          INPUT="$1"; shift ;;
   esac
 done
 
-if [[ -z "$FILE" || ! -f "$FILE" ]]; then
-  echo "usage: $0 <file> [--no-share] [--hours N]" >&2
+if [[ -z "$INPUT" ]] || { [[ ! -f "$INPUT" ]] && [[ ! -d "$INPUT" ]]; }; then
+  echo "usage: $0 <file-or-folder> [--no-share] [--hours N]" >&2
   exit 1
 fi
 
-NAME=$(basename "$FILE")
-SIZE=$(stat -c%s "$FILE" 2>/dev/null || stat -f%z "$FILE")
+CLEANUP_ZIP=""
+cleanup() { if [[ -n "$CLEANUP_ZIP" ]] && [[ -f "$CLEANUP_ZIP" ]]; then rm -f "$CLEANUP_ZIP"; fi; }
+trap cleanup EXIT
+
+if [[ -d "$INPUT" ]]; then
+  if ! command -v zip >/dev/null 2>&1; then
+    echo "zip not found — install it or pass a file path instead of a folder." >&2
+    exit 1
+  fi
+  DIRNAME=$(basename "$INPUT")
+  ABS_DIR=$(cd "$INPUT" && pwd)
+  CLEANUP_ZIP=$(mktemp -t theweb-send.XXXXXX.zip 2>/dev/null || mktemp /tmp/theweb-send.XXXXXX.zip)
+  rm -f "$CLEANUP_ZIP"
+  echo "Zipping folder '$ABS_DIR' -> $DIRNAME.zip ..." >&2
+  (cd "$ABS_DIR" && zip -qr "$CLEANUP_ZIP" .)
+  UPLOAD_PATH="$CLEANUP_ZIP"
+  NAME="$DIRNAME.zip"
+  MIME="application/zip"
+else
+  UPLOAD_PATH="$INPUT"
+  NAME=$(basename "$INPUT")
+  MIME="application/octet-stream"
+fi
+
+SIZE=$(stat -c%s "$UPLOAD_PATH" 2>/dev/null || stat -f%z "$UPLOAD_PATH")
 MS=$(($(date +%s) * 1000))
 KEY="$USER_ID/$MS-$NAME"
 
 if ! curl -fsS -X POST "$SUPABASE_URL/storage/v1/object/vault-files/$KEY" \\
     -H "Authorization: Bearer $TOKEN" \\
-    -H "Content-Type: application/octet-stream" \\
-    --data-binary "@$FILE" >/dev/null; then
+    -H "Content-Type: $MIME" \\
+    --data-binary "@$UPLOAD_PATH" >/dev/null; then
   echo "Upload failed (token may have expired — regenerate at $APP_URL/quick)" >&2
   exit 1
 fi
 
-BODY=$(printf '{"name":"%s","storage_path":"%s","size":%s,"mime_type":"application/octet-stream","folder_id":null,"uploaded_by":"%s","group_id":null}' \\
-  "$NAME" "$KEY" "$SIZE" "$USER_ID")
+BODY=$(printf '{"name":"%s","storage_path":"%s","size":%s,"mime_type":"%s","folder_id":null,"uploaded_by":"%s","group_id":null}' \\
+  "$NAME" "$KEY" "$SIZE" "$MIME" "$USER_ID")
 RECORD=$(curl -fsS -X POST "$SUPABASE_URL/rest/v1/files" \\
   -H "Authorization: Bearer $TOKEN" \\
   -H "apikey: $ANON_KEY" \\
@@ -1114,15 +1194,24 @@ echo "$APP_URL/shared/$SHARE_TOKEN"
 }
 
 function buildAgentInstructions(cfg: ScriptConfig) {
-  return `Upload files to my TheWeb vault by running the helper script:
+  return `Upload to my TheWeb vault by running the helper script. ALWAYS run it
+exactly ONCE per request — never loop over files yourself.
 
-  Windows (PowerShell): pwsh ./theweb-send.ps1 <path-to-file>
-  macOS / Linux:        bash ./theweb-send.sh  <path-to-file>
+  Windows (PowerShell): pwsh ./theweb-send.ps1 <path>
+  macOS / Linux:        bash ./theweb-send.sh  <path>
+
+<path> can be either a FILE or a DIRECTORY.
+
+  - File:   uploaded as-is. Prints ONE share URL.
+  - Folder: the script zips the entire folder into <foldername>.zip and
+            uploads the archive. Prints ONE share URL for the whole
+            folder. Do NOT iterate over the folder's contents. Do NOT
+            call the script per-file.
 
 The script prints the share URL on stdout. Add -NoShare (PowerShell)
 or --no-share (bash) to skip the share link.
 
-If you get an upload error mentioning the token, the embedded token
+If the upload errors with a token-expired message, the embedded token
 has expired — ask me to regenerate the script at ${cfg.appUrl}/quick.
 
 User ID: ${cfg.userId}
