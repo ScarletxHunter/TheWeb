@@ -158,7 +158,7 @@ async function uploadTusBinary(
         resolve({ path: '', error: message });
       },
       onProgress(bytesUploaded: number, bytesTotal: number) {
-        const pct = bytesTotal ? Math.round((bytesUploaded / bytesTotal) * 100) : 0;
+        const pct = bytesTotal ? (bytesUploaded / bytesTotal) * 100 : 0;
         onProgress?.(pct);
       },
       onSuccess() {
@@ -291,9 +291,9 @@ export async function uploadFile(
       chunkName,
       'application/octet-stream',
       (partProgress) => {
-        const currentChunkUploaded = Math.round((partProgress / 100) * chunkBlob.size);
+        const currentChunkUploaded = (partProgress / 100) * chunkBlob.size;
         const totalUploaded = Math.min(file.size, uploadedBytes + currentChunkUploaded);
-        const totalProgress = Math.round((totalUploaded / file.size) * 100);
+        const totalProgress = (totalUploaded / file.size) * 100;
         onProgress?.(totalProgress);
       },
     );
@@ -305,7 +305,7 @@ export async function uploadFile(
 
     uploadedPaths.push(chunkPath);
     uploadedBytes += chunkBlob.size;
-    onProgress?.(Math.round((uploadedBytes / file.size) * 100));
+    onProgress?.((uploadedBytes / file.size) * 100);
   }
 
   return {

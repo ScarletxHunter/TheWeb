@@ -20,6 +20,7 @@ import {
   Lock,
   AlertCircle,
   FolderUp,
+  Download,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import toast from 'react-hot-toast';
@@ -482,19 +483,79 @@ export function QuickSend() {
     toast.success('Token refreshed');
   };
 
-  const tokenForSnippet = tokenVisible && token ? token : 'YOUR_TOKEN_HERE';
-  const pwsh = buildPowerShellSnippet({
-    supabaseUrl,
-    anonKey,
-    userId: user?.id ?? 'YOUR_USER_ID',
-    token: tokenForSnippet,
-  });
-  const curlSh = buildCurlSnippet({
-    supabaseUrl,
-    anonKey,
-    userId: user?.id ?? 'YOUR_USER_ID',
-    token: tokenForSnippet,
-  });
+  const appUrl =
+    typeof window !== 'undefined' ? window.location.origin : '';
+
+  const downloadFile = (filename: string, content: string, mime: string) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  };
+
+  const fetchTokenIfNeeded = async (): Promise<string | null> => {
+    if (token) return token;
+    const { data } = await supabase.auth.getSession();
+    const t = data.session?.access_token ?? null;
+    if (t) setToken(t);
+    return t;
+  };
+
+  const handleDownloadScript = async (kind: 'ps1' | 'sh') => {
+    if (!user) {
+      toast.error('Sign in first');
+      return;
+    }
+    const t = await fetchTokenIfNeeded();
+    if (!t) {
+      toast.error('Could not get session token');
+      return;
+    }
+    const cfg: ScriptConfig = {
+      supabaseUrl,
+      appUrl,
+      anonKey,
+      userId: user.id,
+      token: t,
+    };
+    if (kind === 'ps1') {
+      downloadFile(
+        'theweb-send.ps1',
+        buildPowerShellScript(cfg),
+        'text/plain',
+      );
+      toast.success('Downloaded theweb-send.ps1');
+    } else {
+      downloadFile(
+        'theweb-send.sh',
+        buildBashScript(cfg),
+        'text/plain',
+      );
+      toast.success('Downloaded theweb-send.sh');
+    }
+  };
+
+  const copyAgentInstructions = async () => {
+    if (!user) {
+      toast.error('Sign in first');
+      return;
+    }
+    const t = await fetchTokenIfNeeded();
+    const cfg: ScriptConfig = {
+      supabaseUrl,
+      appUrl,
+      anonKey,
+      userId: user.id,
+      token: t ?? '',
+    };
+    await copySnippet('agent', buildAgentInstructions(cfg));
+    toast.success('Agent instructions copied');
+  };
 
   const selectedExpiryLabel =
     EXPIRY_OPTIONS.find((o) => o.value === expiresInHours)?.label ?? '7 days';
@@ -652,7 +713,16 @@ export function QuickSend() {
           {/* In-flight uploads */}
           {uploads.length > 0 && (
             <div className="space-y-2">
-              {uploads.map((u) => (
+              {uploads.map((u) => {
+                const uploaded = Math.min(
+                  u.file.size,
+                  (u.progress / 100) * u.file.size,
+                );
+                const pctLabel =
+                  u.progress >= 10
+                    ? `${Math.round(u.progress)}%`
+                    : `${u.progress.toFixed(1)}%`;
+                return (
                 <div
                   key={u.id}
                   className="bg-gray-900 border border-gray-800 rounded-lg p-3 flex items-center gap-3"
@@ -660,7 +730,9 @@ export function QuickSend() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-white truncate">{u.file.name}</p>
                     <p className="text-xs text-gray-500">
-                      {formatBytes(u.file.size)}
+                      {u.status === 'uploading'
+                        ? `${formatBytes(uploaded)} of ${formatBytes(u.file.size)}`
+                        : formatBytes(u.file.size)}
                     </p>
                     {(u.status === 'uploading' || u.status === 'sharing') && (
                       <div className="mt-1.5 h-1.5 bg-gray-700 rounded-full overflow-hidden">
@@ -675,7 +747,7 @@ export function QuickSend() {
                   </div>
                   <div className="flex-shrink-0 text-xs">
                     {u.status === 'uploading' && (
-                      <span className="text-gray-400">{u.progress}%</span>
+                      <span className="text-gray-400">{pctLabel}</span>
                     )}
                     {u.status === 'sharing' && (
                       <span className="text-indigo-400">Sharing…</span>
@@ -693,7 +765,8 @@ export function QuickSend() {
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -741,7 +814,7 @@ export function QuickSend() {
             </div>
           )}
 
-          {/* Terminal / API section */}
+          {/* Hand-off to AI agent */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl">
             <button
               onClick={() => setShowApi(!showApi)}
@@ -750,11 +823,12 @@ export function QuickSend() {
               <Terminal className="w-5 h-5 text-gray-400 flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-white">
-                  Upload from your PC's terminal
+                  Hand it to Claude Code, Cursor, or Codex
                 </p>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Paste a PowerShell or cURL snippet to push files straight
-                  from disk.
+                  Download a one-shot script with your auth baked in — your
+                  agent runs <code className="text-gray-400">theweb-send {'<file>'}</code> and
+                  gets back a share URL.
                 </p>
               </div>
               {showApi ? (
@@ -766,14 +840,56 @@ export function QuickSend() {
 
             {showApi && (
               <div className="border-t border-gray-800 p-4 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    onClick={() => handleDownloadScript('ps1')}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download theweb-send.ps1
+                  </button>
+                  <button
+                    onClick={() => handleDownloadScript('sh')}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg cursor-pointer transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download theweb-send.sh
+                  </button>
+                </div>
+
+                <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 space-y-1 text-xs font-mono text-gray-300 leading-relaxed">
+                  <p className="text-gray-500"># Then run it</p>
+                  <p>pwsh ./theweb-send.ps1 ./my-photo.jpg</p>
+                  <p>bash ./theweb-send.sh ./my-photo.jpg</p>
+                  <p className="text-gray-500 pt-2"># Output</p>
+                  <p>{appUrl}/shared/abcdef…</p>
+                </div>
+
+                <button
+                  onClick={copyAgentInstructions}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs rounded-lg cursor-pointer transition-colors"
+                >
+                  {copiedSnippet === 'agent' ? (
+                    <Check className="w-3.5 h-3.5" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                  Copy instructions for your AI agent
+                </button>
+
                 <p className="text-xs text-gray-500 leading-relaxed">
-                  These commands use your current login session. The token
-                  below rotates each time you sign in. Hit{' '}
-                  <span className="text-gray-300">Refresh token</span> if your
-                  uploads start coming back as 401.
+                  The script has your auth token baked in and expires ~1 hour
+                  after download. When it stops working, come back here and
+                  download again.
                 </p>
 
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-gray-800/60">
+                  <button
+                    onClick={refreshToken}
+                    className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg cursor-pointer transition-colors"
+                  >
+                    Refresh token
+                  </button>
                   <button
                     onClick={() => setTokenVisible(!tokenVisible)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg cursor-pointer transition-colors"
@@ -785,12 +901,6 @@ export function QuickSend() {
                     )}
                     {tokenVisible ? 'Hide token' : 'Reveal token'}
                   </button>
-                  <button
-                    onClick={refreshToken}
-                    className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg cursor-pointer transition-colors"
-                  >
-                    Refresh token
-                  </button>
                   {tokenVisible && token && (
                     <button
                       onClick={() => copySnippet('token', token)}
@@ -801,32 +911,10 @@ export function QuickSend() {
                       ) : (
                         <Copy className="w-3.5 h-3.5" />
                       )}
-                      Copy token only
+                      Copy token
                     </button>
                   )}
                 </div>
-
-                <SnippetBlock
-                  title="PowerShell (Windows)"
-                  code={pwsh}
-                  keyId="pwsh"
-                  copied={copiedSnippet === 'pwsh'}
-                  onCopy={copySnippet}
-                />
-                <SnippetBlock
-                  title="cURL (macOS / Linux / Git Bash)"
-                  code={curlSh}
-                  keyId="curl"
-                  copied={copiedSnippet === 'curl'}
-                  onCopy={copySnippet}
-                />
-
-                <p className="text-xs text-gray-600 leading-relaxed">
-                  Once the upload finishes, the file shows up in{' '}
-                  <span className="text-gray-400">My Files</span>. Open it
-                  there to create a share link, or drop it here for an
-                  instant one.
-                </p>
               </div>
             )}
           </div>
@@ -836,120 +924,207 @@ export function QuickSend() {
   );
 }
 
-function SnippetBlock({
-  title,
-  code,
-  keyId,
-  copied,
-  onCopy,
-}: {
-  title: string;
-  code: string;
-  keyId: string;
-  copied: boolean;
-  onCopy: (k: string, t: string) => void;
-}) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <h3 className="text-xs font-medium text-gray-300">{title}</h3>
-        <button
-          onClick={() => onCopy(keyId, code)}
-          className="flex items-center gap-1.5 px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded cursor-pointer transition-colors"
-        >
-          {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-      <pre className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-300 overflow-x-auto font-mono leading-relaxed whitespace-pre">
-        {code}
-      </pre>
-    </div>
-  );
-}
-
-function buildPowerShellSnippet({
-  supabaseUrl,
-  anonKey,
-  userId,
-  token,
-}: {
+type ScriptConfig = {
   supabaseUrl: string;
+  appUrl: string;
   anonKey: string;
   userId: string;
   token: string;
-}) {
-  return `# Push a file to TheWeb from PowerShell
-$file        = "C:\\path\\to\\file.zip"   # <- change me
-$token       = "${token}"
-$supabaseUrl = "${supabaseUrl}"
-$anonKey     = "${anonKey}"
-$userId      = "${userId}"
+};
 
-$name = [System.IO.Path]::GetFileName($file)
-$size = (Get-Item $file).Length
-$key  = "$userId/$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())-$name"
+function buildPowerShellScript(cfg: ScriptConfig) {
+  return `#!/usr/bin/env pwsh
+<#
+.SYNOPSIS
+  Upload a file to TheWeb and print the share URL.
+.DESCRIPTION
+  Hand this script to Claude Code, Cursor, Codex, or any CLI agent.
+  It uploads <Path> to your vault and prints a share URL on stdout.
+  When the embedded token expires (~1 hour), regenerate at:
+    ${cfg.appUrl}/quick
+.EXAMPLE
+  .\\theweb-send.ps1 .\\photo.jpg
+  ${cfg.appUrl}/shared/abcdef...
+.EXAMPLE
+  .\\theweb-send.ps1 .\\big.zip -NoShare
+  Uploaded big.zip
+#>
+[CmdletBinding()]
+param(
+  [Parameter(Mandatory, Position=0)][string]$Path,
+  [switch]$NoShare,
+  [int]$ExpiresHours = 168
+)
+$ErrorActionPreference = "Stop"
 
-# 1) Upload the binary to storage
-Invoke-RestMethod -Method Post -InFile $file \`
-  -Uri "$supabaseUrl/storage/v1/object/vault-files/$key" \`
-  -Headers @{ "Authorization" = "Bearer $token" } \`
-  -ContentType "application/octet-stream" | Out-Null
+$SUPABASE_URL = "${cfg.supabaseUrl}"
+$APP_URL      = "${cfg.appUrl}"
+$ANON_KEY     = "${cfg.anonKey}"
+$USER_ID      = "${cfg.userId}"
+$TOKEN        = "${cfg.token}"
 
-# 2) Register it so it shows in your vault
-$body = @{
-  name         = $name
-  storage_path = $key
-  size         = $size
-  mime_type    = "application/octet-stream"
-  folder_id    = $null
-  uploaded_by  = $userId
-  group_id     = $null
-} | ConvertTo-Json
-Invoke-RestMethod -Method Post -Body $body -ContentType "application/json" \`
-  -Uri  "$supabaseUrl/rest/v1/files" \`
+if (-not (Test-Path $Path)) { Write-Error "File not found: $Path"; exit 1 }
+$item = Get-Item $Path
+$name = $item.Name
+$size = $item.Length
+$ms   = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$key  = "$USER_ID/$ms-$name"
+
+try {
+  Invoke-RestMethod -Method Post -InFile $item.FullName \`
+    -Uri "$SUPABASE_URL/storage/v1/object/vault-files/$key" \`
+    -Headers @{ Authorization = "Bearer $TOKEN" } \`
+    -ContentType "application/octet-stream" | Out-Null
+} catch {
+  Write-Error "Upload failed (token may have expired — regenerate at $APP_URL/quick): $_"
+  exit 1
+}
+
+$record = Invoke-RestMethod -Method Post \`
+  -Uri "$SUPABASE_URL/rest/v1/files" \`
   -Headers @{
-    "Authorization" = "Bearer $token"
-    "apikey"        = $anonKey
-    "Prefer"        = "return=representation"
-  }
+    Authorization = "Bearer $TOKEN"
+    apikey        = $ANON_KEY
+    Prefer        = "return=representation"
+  } \`
+  -ContentType "application/json" \`
+  -Body (@{
+    name         = $name
+    storage_path = $key
+    size         = $size
+    mime_type    = "application/octet-stream"
+    folder_id    = $null
+    uploaded_by  = $USER_ID
+    group_id     = $null
+  } | ConvertTo-Json)
+
+if ($NoShare) { Write-Output "Uploaded $name ($size bytes)."; exit 0 }
+
+$chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.ToCharArray()
+$shareTok = -join ((1..32) | ForEach-Object { Get-Random -InputObject $chars })
+$expiresAt = $null
+if ($ExpiresHours -gt 0) {
+  $expiresAt = (Get-Date).ToUniversalTime().AddHours($ExpiresHours).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+}
+
+Invoke-RestMethod -Method Post \`
+  -Uri "$SUPABASE_URL/rest/v1/share_links" \`
+  -Headers @{
+    Authorization = "Bearer $TOKEN"
+    apikey        = $ANON_KEY
+    Prefer        = "return=representation"
+  } \`
+  -ContentType "application/json" \`
+  -Body (@{
+    file_id       = $record[0].id
+    token         = $shareTok
+    expires_at    = $expiresAt
+    created_by    = $USER_ID
+    password_hash = $null
+  } | ConvertTo-Json) | Out-Null
+
+Write-Output "$APP_URL/shared/$shareTok"
 `;
 }
 
-function buildCurlSnippet({
-  supabaseUrl,
-  anonKey,
-  userId,
-  token,
-}: {
-  supabaseUrl: string;
-  anonKey: string;
-  userId: string;
-  token: string;
-}) {
-  return `# Push a file to TheWeb from your terminal
-FILE="./path/to/file.zip"            # <- change me
-TOKEN="${token}"
-SUPABASE_URL="${supabaseUrl}"
-ANON_KEY="${anonKey}"
-USER_ID="${userId}"
+function buildBashScript(cfg: ScriptConfig) {
+  return `#!/usr/bin/env bash
+# theweb-send.sh — upload a file to TheWeb and print the share URL.
+#
+# Hand this to Claude Code, Cursor, Codex, or any CLI agent. It uploads
+# the file at <path> and prints the share URL on stdout. When the
+# embedded token expires (~1 hour), regenerate at:
+#   ${cfg.appUrl}/quick
+#
+# Usage:
+#   ./theweb-send.sh <path>              # upload + 7-day share link
+#   ./theweb-send.sh <path> --no-share   # upload only
+#   ./theweb-send.sh <path> --hours 24   # custom expiry
+set -euo pipefail
+
+SUPABASE_URL="${cfg.supabaseUrl}"
+APP_URL="${cfg.appUrl}"
+ANON_KEY="${cfg.anonKey}"
+USER_ID="${cfg.userId}"
+TOKEN="${cfg.token}"
+
+NO_SHARE=0
+EXPIRES_HOURS=168
+FILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-share) NO_SHARE=1; shift ;;
+    --hours)    EXPIRES_HOURS="$2"; shift 2 ;;
+    *)          FILE="$1"; shift ;;
+  esac
+done
+
+if [[ -z "$FILE" || ! -f "$FILE" ]]; then
+  echo "usage: $0 <file> [--no-share] [--hours N]" >&2
+  exit 1
+fi
 
 NAME=$(basename "$FILE")
 SIZE=$(stat -c%s "$FILE" 2>/dev/null || stat -f%z "$FILE")
-KEY="$USER_ID/$(date +%s)000-$NAME"
+MS=$(($(date +%s) * 1000))
+KEY="$USER_ID/$MS-$NAME"
 
-# 1) Upload the binary to storage
-curl -fsS -X POST "$SUPABASE_URL/storage/v1/object/vault-files/$KEY" \\
-  -H "Authorization: Bearer $TOKEN" \\
-  -H "Content-Type: application/octet-stream" \\
-  --data-binary "@$FILE"
+if ! curl -fsS -X POST "$SUPABASE_URL/storage/v1/object/vault-files/$KEY" \\
+    -H "Authorization: Bearer $TOKEN" \\
+    -H "Content-Type: application/octet-stream" \\
+    --data-binary "@$FILE" >/dev/null; then
+  echo "Upload failed (token may have expired — regenerate at $APP_URL/quick)" >&2
+  exit 1
+fi
 
-# 2) Register it so it shows in your vault
-curl -fsS -X POST "$SUPABASE_URL/rest/v1/files" \\
+BODY=$(printf '{"name":"%s","storage_path":"%s","size":%s,"mime_type":"application/octet-stream","folder_id":null,"uploaded_by":"%s","group_id":null}' \\
+  "$NAME" "$KEY" "$SIZE" "$USER_ID")
+RECORD=$(curl -fsS -X POST "$SUPABASE_URL/rest/v1/files" \\
   -H "Authorization: Bearer $TOKEN" \\
   -H "apikey: $ANON_KEY" \\
   -H "Content-Type: application/json" \\
   -H "Prefer: return=representation" \\
-  -d "{\\"name\\":\\"$NAME\\",\\"storage_path\\":\\"$KEY\\",\\"size\\":$SIZE,\\"mime_type\\":\\"application/octet-stream\\",\\"folder_id\\":null,\\"uploaded_by\\":\\"$USER_ID\\",\\"group_id\\":null}"
+  -d "$BODY")
+FILE_ID=$(printf '%s' "$RECORD" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p' | head -1)
+
+if [[ "$NO_SHARE" == "1" ]]; then
+  echo "Uploaded $NAME ($SIZE bytes)."
+  exit 0
+fi
+
+SHARE_TOKEN=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+if [[ "$EXPIRES_HOURS" -gt 0 ]]; then
+  EXPIRES_AT=$(date -u -d "+$EXPIRES_HOURS hours" +"%Y-%m-%dT%H:%M:%S.000Z" 2>/dev/null \\
+    || date -u -v+"$EXPIRES_HOURS"H +"%Y-%m-%dT%H:%M:%S.000Z")
+  EXPIRES_FIELD="\\"$EXPIRES_AT\\""
+else
+  EXPIRES_FIELD="null"
+fi
+
+curl -fsS -X POST "$SUPABASE_URL/rest/v1/share_links" \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H "apikey: $ANON_KEY" \\
+  -H "Content-Type: application/json" \\
+  -H "Prefer: return=representation" \\
+  -d "{\\"file_id\\":\\"$FILE_ID\\",\\"token\\":\\"$SHARE_TOKEN\\",\\"expires_at\\":$EXPIRES_FIELD,\\"created_by\\":\\"$USER_ID\\",\\"password_hash\\":null}" \\
+  >/dev/null
+
+echo "$APP_URL/shared/$SHARE_TOKEN"
+`;
+}
+
+function buildAgentInstructions(cfg: ScriptConfig) {
+  return `Upload files to my TheWeb vault by running the helper script:
+
+  Windows (PowerShell): pwsh ./theweb-send.ps1 <path-to-file>
+  macOS / Linux:        bash ./theweb-send.sh  <path-to-file>
+
+The script prints the share URL on stdout. Add -NoShare (PowerShell)
+or --no-share (bash) to skip the share link.
+
+If you get an upload error mentioning the token, the embedded token
+has expired — ask me to regenerate the script at ${cfg.appUrl}/quick.
+
+User ID: ${cfg.userId}
 `;
 }
