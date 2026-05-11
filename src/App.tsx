@@ -10,6 +10,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Admin } from './pages/Admin';
 import { Trash } from './pages/Trash';
 import { Groups } from './pages/Groups';
+import { QuickSend } from './pages/QuickSend';
 import { SharedFile } from './pages/SharedFile';
 import { SetupGuide } from './pages/SetupGuide';
 import { isSupabaseConfigured } from './lib/supabase';
@@ -63,6 +64,16 @@ export default function App() {
               <ProtectedRoute>
                 <Layout>
                   <Groups />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/quick"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <QuickSend />
                 </Layout>
               </ProtectedRoute>
             }

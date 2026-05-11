@@ -13,6 +13,7 @@ import {
   HardDrive,
   X,
   Pencil,
+  Zap,
 } from 'lucide-react';
 import { EditProfileModal } from './EditProfileModal';
 import type { Group } from '../../types';
@@ -39,6 +40,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   }, [user]);
 
   const navLinks = [
+    { to: '/quick', icon: Zap, label: 'Quick Send' },
     { to: '/trash', icon: Trash2, label: 'Trash' },
     { to: '/groups', icon: Users, label: 'Groups' },
     ...(isAdmin ? [{ to: '/admin', icon: Shield, label: 'Admin' }] : []),
