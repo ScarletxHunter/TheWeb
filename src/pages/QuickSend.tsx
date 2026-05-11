@@ -4,6 +4,7 @@ import {
   useCallback,
   useRef,
   type DragEvent,
+  type InputHTMLAttributes,
 } from 'react';
 import {
   Zap,
@@ -18,7 +19,9 @@ import {
   EyeOff,
   Lock,
   AlertCircle,
+  FolderUp,
 } from 'lucide-react';
+import JSZip from 'jszip';
 import toast from 'react-hot-toast';
 import { Header } from '../components/layout/Header';
 import { useAuth } from '../context/AuthContext';
@@ -62,6 +65,72 @@ const EXPIRY_OPTIONS = [
   { value: 720, label: '30 days' },
 ];
 
+type DirectoryInputAttributes = InputHTMLAttributes<HTMLInputElement> & {
+  webkitdirectory?: string;
+  directory?: string;
+};
+
+const folderInputAttributes: DirectoryInputAttributes = {
+  webkitdirectory: '',
+  directory: '',
+  multiple: true,
+};
+
+async function readAllDirEntries(
+  reader: FileSystemDirectoryReader,
+): Promise<FileSystemEntry[]> {
+  const collected: FileSystemEntry[] = [];
+  while (true) {
+    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
+      reader.readEntries(resolve, reject),
+    );
+    if (batch.length === 0) return collected;
+    collected.push(...batch);
+  }
+}
+
+async function collectFilesFromEntry(
+  entry: FileSystemEntry,
+  prefix: string,
+  out: { path: string; file: File }[],
+): Promise<void> {
+  if (entry.isFile) {
+    const file = await new Promise<File>((resolve, reject) =>
+      (entry as FileSystemFileEntry).file(resolve, reject),
+    );
+    out.push({ path: prefix + entry.name, file });
+    return;
+  }
+  const reader = (entry as FileSystemDirectoryEntry).createReader();
+  const children = await readAllDirEntries(reader);
+  for (const child of children) {
+    await collectFilesFromEntry(child, prefix + entry.name + '/', out);
+  }
+}
+
+async function zipFilesToBlob(
+  entries: { path: string; file: File }[],
+  onProgress?: (pct: number) => void,
+): Promise<Blob> {
+  const zip = new JSZip();
+  for (const { path, file } of entries) {
+    zip.file(path, file);
+  }
+  return zip.generateAsync(
+    { type: 'blob', compression: 'STORE' },
+    onProgress
+      ? (meta) => {
+          onProgress(Math.round(meta.percent));
+        }
+      : undefined,
+  );
+}
+
+function safeZipName(name: string): string {
+  const cleaned = name.replace(/[\\/:*?"<>|]+/g, '_').trim();
+  return cleaned || 'folder';
+}
+
 export function QuickSend() {
   const { user, profile } = useAuth();
   const [dragOver, setDragOver] = useState(false);
@@ -75,7 +144,11 @@ export function QuickSend() {
   const [tokenVisible, setTokenVisible] = useState(false);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
+  const [zipping, setZipping] = useState<{ name: string; pct: number } | null>(
+    null,
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!showApi) return;
@@ -271,15 +344,105 @@ export function QuickSend() {
     [user, profile, expiresInHours, passwordEnabled, password],
   );
 
+  const zipAndShare = useCallback(
+    async (
+      entries: { path: string; file: File }[],
+      zipBaseName: string,
+    ) => {
+      if (entries.length === 0) {
+        toast.error('Folder is empty');
+        return;
+      }
+
+      const totalBytes = entries.reduce((s, e) => s + e.file.size, 0);
+      const safeName = safeZipName(zipBaseName);
+      const zipName = `${safeName}.zip`;
+
+      setZipping({ name: zipName, pct: 0 });
+      const toastId = `zip-${zipName}`;
+      toast.loading(
+        `Zipping ${entries.length} file(s) (${formatBytes(totalBytes)})…`,
+        { id: toastId },
+      );
+
+      try {
+        const zipBlob = await zipFilesToBlob(entries, (pct) => {
+          setZipping((prev) => (prev ? { ...prev, pct } : prev));
+        });
+        toast.dismiss(toastId);
+        setZipping(null);
+
+        const zipFile = new File([zipBlob], zipName, {
+          type: 'application/zip',
+          lastModified: Date.now(),
+        });
+        await uploadAndShare([zipFile]);
+      } catch (err) {
+        toast.dismiss(toastId);
+        setZipping(null);
+        toast.error(
+          `Could not zip folder: ${err instanceof Error ? err.message : 'unknown error'}`,
+        );
+      }
+    },
+    [uploadAndShare],
+  );
+
   const handleDrop = useCallback(
-    (e: DragEvent) => {
+    async (e: DragEvent) => {
       e.preventDefault();
       setDragOver(false);
+
+      const items = e.dataTransfer.items;
+      const entries: FileSystemEntry[] = [];
+      if (items && items.length) {
+        for (let i = 0; i < items.length; i++) {
+          const entry = items[i].webkitGetAsEntry?.();
+          if (entry) entries.push(entry);
+        }
+      }
+
+      const hasDirectory = entries.some((entry) => entry.isDirectory);
+      if (hasDirectory) {
+        const collected: { path: string; file: File }[] = [];
+        try {
+          for (const entry of entries) {
+            await collectFilesFromEntry(entry, '', collected);
+          }
+        } catch (err) {
+          toast.error(
+            `Could not read folder: ${err instanceof Error ? err.message : 'unknown error'}`,
+          );
+          return;
+        }
+
+        const dirEntries = entries.filter((e) => e.isDirectory);
+        const zipBaseName =
+          dirEntries.length === 1 ? dirEntries[0].name : 'drop';
+        await zipAndShare(collected, zipBaseName);
+        return;
+      }
+
       if (e.dataTransfer.files.length) {
         uploadAndShare(Array.from(e.dataTransfer.files));
       }
     },
-    [uploadAndShare],
+    [uploadAndShare, zipAndShare],
+  );
+
+  const handleFolderPick = useCallback(
+    async (fileList: FileList) => {
+      const files = Array.from(fileList);
+      if (files.length === 0) return;
+      const firstPath = files[0].webkitRelativePath || files[0].name;
+      const zipBaseName = firstPath.split('/')[0] || 'folder';
+      const entries = files.map((file) => ({
+        path: file.webkitRelativePath || file.name,
+        file,
+      }));
+      await zipAndShare(entries, zipBaseName);
+    },
+    [zipAndShare],
   );
 
   const copyShare = async (token: string, url: string) => {
@@ -420,13 +583,25 @@ export function QuickSend() {
           >
             <Upload className="w-12 h-12 text-gray-500 mx-auto mb-3" />
             <p className="text-sm text-gray-300">
-              <span className="text-indigo-400 font-medium">Drop a file</span>{' '}
-              or click — link copies to your clipboard the moment it's ready.
+              <span className="text-indigo-400 font-medium">
+                Drop files or a folder
+              </span>{' '}
+              — link copies to your clipboard the moment it's ready. Folders
+              are zipped into one archive.
             </p>
             <p className="text-xs text-gray-600 mt-2">
               {passwordEnabled && password ? 'Password protected · ' : ''}
               {selectedExpiryLabel}
             </p>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                folderInputRef.current?.click();
+              }}
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg transition-colors cursor-pointer"
+            >
+              <FolderUp className="w-3.5 h-3.5" /> Choose folder
+            </button>
           </div>
 
           <input
@@ -441,6 +616,38 @@ export function QuickSend() {
               }
             }}
           />
+
+          <input
+            ref={folderInputRef}
+            type="file"
+            className="hidden"
+            {...folderInputAttributes}
+            onChange={(e) => {
+              if (e.target.files?.length) {
+                handleFolderPick(e.target.files);
+                e.target.value = '';
+              }
+            }}
+          />
+
+          {/* Zipping progress */}
+          {zipping && (
+            <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-white truncate">{zipping.name}</p>
+                <p className="text-xs text-gray-500">Zipping folder…</p>
+                <div className="mt-1.5 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                    style={{ width: `${zipping.pct}%` }}
+                  />
+                </div>
+              </div>
+              <div className="flex-shrink-0 text-xs text-gray-400">
+                {zipping.pct}%
+              </div>
+            </div>
+          )}
 
           {/* In-flight uploads */}
           {uploads.length > 0 && (
