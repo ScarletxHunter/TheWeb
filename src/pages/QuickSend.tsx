@@ -524,17 +524,20 @@ export function QuickSend() {
       token: t,
     };
     if (kind === 'ps1') {
+      // Prepend UTF-8 BOM so Windows PowerShell parses the file as UTF-8
+      // instead of falling back to Windows-1252 (which would corrupt any
+      // non-ASCII bytes and surface as parser errors).
       downloadFile(
         'theweb-send.ps1',
-        buildPowerShellScript(cfg),
-        'text/plain',
+        '﻿' + buildPowerShellScript(cfg),
+        'text/plain; charset=utf-8',
       );
       toast.success('Downloaded theweb-send.ps1');
     } else {
       downloadFile(
         'theweb-send.sh',
         buildBashScript(cfg),
-        'text/plain',
+        'text/plain; charset=utf-8',
       );
       toast.success('Downloaded theweb-send.sh');
     }
@@ -946,7 +949,7 @@ function buildPowerShellScript(cfg: ScriptConfig) {
   - If <Path> is a DIRECTORY: the entire folder is zipped client-side
     into <foldername>.zip and uploaded as a single archive. ONE share
     URL is printed for the whole folder. Do NOT loop over the files
-    yourself — pass the directory path directly.
+    yourself -- pass the directory path directly.
 
   When the embedded token expires (~1 hour), regenerate at:
     ${cfg.appUrl}/quick
@@ -1019,7 +1022,7 @@ try {
       -Headers @{ Authorization = "Bearer $TOKEN" } \`
       -ContentType $mime | Out-Null
   } catch {
-    Write-Error "Upload failed (token may have expired — regenerate at $APP_URL/quick): $_"
+    Write-Error "Upload failed (token may have expired -- regenerate at $APP_URL/quick): $_"
     exit 1
   }
 
@@ -1078,7 +1081,7 @@ finally {
 
 function buildBashScript(cfg: ScriptConfig) {
   return `#!/usr/bin/env bash
-# theweb-send.sh — upload a file or folder to TheWeb and print one share URL.
+# theweb-send.sh -- upload a file or folder to TheWeb and print one share URL.
 #
 # Hand this to Claude Code, Cursor, Codex, or any CLI agent.
 #
@@ -1086,7 +1089,7 @@ function buildBashScript(cfg: ScriptConfig) {
 #   - If <path> is a DIRECTORY: the entire folder is zipped client-side
 #     into <foldername>.zip and uploaded as a single archive. ONE share
 #     URL is printed for the whole folder. Do NOT loop over the files
-#     yourself — pass the directory path directly.
+#     yourself -- pass the directory path directly.
 #
 # When the embedded token expires (~1 hour), regenerate at:
 #   ${cfg.appUrl}/quick
@@ -1127,7 +1130,7 @@ trap cleanup EXIT
 
 if [[ -d "$INPUT" ]]; then
   if ! command -v zip >/dev/null 2>&1; then
-    echo "zip not found — install it or pass a file path instead of a folder." >&2
+    echo "zip not found -- install it or pass a file path instead of a folder." >&2
     exit 1
   fi
   DIRNAME=$(basename "$INPUT")
@@ -1153,7 +1156,7 @@ if ! curl -fsS -X POST "$SUPABASE_URL/storage/v1/object/vault-files/$KEY" \\
     -H "Authorization: Bearer $TOKEN" \\
     -H "Content-Type: $MIME" \\
     --data-binary "@$UPLOAD_PATH" >/dev/null; then
-  echo "Upload failed (token may have expired — regenerate at $APP_URL/quick)" >&2
+  echo "Upload failed (token may have expired -- regenerate at $APP_URL/quick)" >&2
   exit 1
 fi
 
