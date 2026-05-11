@@ -137,7 +137,7 @@ async function uploadTusBinary(
         contentType: contentType || 'application/octet-stream',
         cacheControl: '3600',
       },
-      chunkSize: 6 * 1024 * 1024,
+      chunkSize: 16 * 1024 * 1024,
       onError(err: TusError) {
         let message = err.message || 'Upload failed';
         if ('originalResponse' in err) {
@@ -275,10 +275,27 @@ export async function uploadFile(
 
   const totalParts = Math.ceil(file.size / UPLOAD_PART_SIZE_BYTES);
   const chunkPrefix = `${storagePath}.parts`;
-  const uploadedPaths: string[] = [];
-  let uploadedBytes = 0;
+  const PARALLELISM = 3;
 
-  for (let index = 0; index < totalParts; index++) {
+  const partProgressPct = new Array<number>(totalParts).fill(0);
+  const partSizes = Array.from({ length: totalParts }, (_, i) => {
+    const start = i * UPLOAD_PART_SIZE_BYTES;
+    const end = Math.min(start + UPLOAD_PART_SIZE_BYTES, file.size);
+    return end - start;
+  });
+
+  const reportProgress = () => {
+    let uploaded = 0;
+    for (let i = 0; i < totalParts; i++) {
+      uploaded += (partProgressPct[i] / 100) * partSizes[i];
+    }
+    onProgress?.((Math.min(file.size, uploaded) / file.size) * 100);
+  };
+
+  const uploadedPaths: string[] = [];
+  let firstError: string | null = null;
+
+  const uploadPart = async (index: number): Promise<void> => {
     const start = index * UPLOAD_PART_SIZE_BYTES;
     const end = Math.min(start + UPLOAD_PART_SIZE_BYTES, file.size);
     const chunkBlob = file.slice(start, end);
@@ -290,22 +307,40 @@ export async function uploadFile(
       chunkPath,
       chunkName,
       'application/octet-stream',
-      (partProgress) => {
-        const currentChunkUploaded = (partProgress / 100) * chunkBlob.size;
-        const totalUploaded = Math.min(file.size, uploadedBytes + currentChunkUploaded);
-        const totalProgress = (totalUploaded / file.size) * 100;
-        onProgress?.(totalProgress);
+      (pct) => {
+        partProgressPct[index] = pct;
+        reportProgress();
       },
     );
 
     if (error) {
-      await removeStoragePaths(uploadedPaths);
-      return { path: '', error };
+      if (!firstError) firstError = error;
+      return;
     }
 
+    partProgressPct[index] = 100;
     uploadedPaths.push(chunkPath);
-    uploadedBytes += chunkBlob.size;
-    onProgress?.((uploadedBytes / file.size) * 100);
+    reportProgress();
+  };
+
+  let nextIndex = 0;
+  const workers: Promise<void>[] = [];
+  for (let w = 0; w < Math.min(PARALLELISM, totalParts); w++) {
+    workers.push(
+      (async () => {
+        while (!firstError) {
+          const idx = nextIndex++;
+          if (idx >= totalParts) return;
+          await uploadPart(idx);
+        }
+      })(),
+    );
+  }
+  await Promise.all(workers);
+
+  if (firstError) {
+    await removeStoragePaths(uploadedPaths);
+    return { path: '', error: firstError };
   }
 
   return {
